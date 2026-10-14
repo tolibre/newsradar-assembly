@@ -16,6 +16,24 @@ import hashlib, os, re, shutil, sys
 
 # ---------------------------------------------------------------- 설정값 ---
 REPORTER = "박정환"
+# 박정환 기자는 CBS 국회팀장 — <기처리>에 팀원 기사를 모두 넣는다(사용자 요청 2026-10-15).
+TEAM = ["박정환", "김태헌", "김재환", "박희영", "박인", "윤준호", "이은지", "김정록"]
+TEAM_SECTION = "CBS 국회팀"
+
+# '전체' 탭 묶음 가산(원본 LIVE_MEDIA_BOOST 자리에 채운다 — 사용자 요청 2026-10-15).
+# 주요 일간지·종편·보도PP·3대 통신사는 조금, 09:00 보고는 조간 종합지, 14:00 보고는 석간지를 크게.
+# 매체명은 원본 media_name() 결과 그대로. 내일신문은 원본 화이트리스트에 없어 아래에서 더한다.
+DAILY_AM = ["조선일보", "중앙일보", "동아일보", "한국일보", "경향신문", "한겨레",
+            "국민일보", "서울신문", "세계일보"]
+DAILY_PM = ["문화일보", "내일신문", "헤럴드경제", "아시아경제"]
+BROADCAST = ["TV조선", "JTBC", "채널A", "MBN", "YTN", "연합뉴스TV"]
+WIRE = ["연합뉴스", "뉴시스", "뉴스1"]
+BOOST_BASE, BOOST_SLOT = 1.5, 3.0
+NEW_BOOST = ("LIVE_MEDIA_BOOST = {\n"
+             f'    "*": [({set(DAILY_AM + DAILY_PM + BROADCAST + WIRE)!r}, {BOOST_BASE})],\n'
+             f'    "am": [({set(DAILY_AM)!r}, {BOOST_SLOT})],\n'
+             f'    "pm": [({set(DAILY_PM)!r}, {BOOST_SLOT})],\n'
+             "}   # 국회판(생성기)\n")
 BEATS_TITLE = "국회·정당"
 STORE_PREFIX = "nm-asm-"                  # 원본('nm-live-')·재경부판('nm-moef-')과 같은 출처라 반드시 달라야 한다
 PARTIES = ["더불어민주당", "국민의힘", "조국혁신당", "개혁신당"]   # 사용자가 준 순서 = 섹션 순서
@@ -89,7 +107,14 @@ REPLACEMENTS = [
          NEW_FALLBACK, 1, False),
     # ---- news_monitor.py: 바이라인 ----
     (NM, 'BYLINE_NAME = "김광일"', f'BYLINE_NAME = "{REPORTER}"', 1, False),
-    (NM, 'BYLINE_SECTION = "김광일 기자"', f'BYLINE_SECTION = "{REPORTER} 기자"', 1, False),
+    (NM, 'BYLINE_SECTION = "김광일 기자"', f'BYLINE_SECTION = "{TEAM_SECTION}"', 1, False),
+    (NM, "BYLINE_NAMES = [BYLINE_NAME]\n", f"BYLINE_NAMES = {TEAM!r}   # 국회팀(생성기)\n", 1, False),
+    (NM, "LIVE_MEDIA_BOOST = {}\n", NEW_BOOST, 1, False),
+    # 석간 내일신문을 화이트리스트에 더한다(원본엔 없음 — 없으면 페이지에 아예 안 뜬다)
+    (NM, "STORE_NON_WHITELIST = True\n",
+         "STORE_NON_WHITELIST = True\nMEDIA_DOMAINS.add(\"naeil.com\"); MEDIA_NAMES.add(\"내일신문\")   # 국회판(생성기)\n", 1, False),
+    (NM, "def media_name(source):\n",
+         "DOMAIN_TO_NAME[\"naeil.com\"] = \"내일신문\"   # 국회판(생성기)\n\ndef media_name(source):\n", 1, False),
 
     # ---- render_page.py ----
     (RP, "var REPORT_ORDER = ['방미통위','공정위','과기정통부','우주항공청'];",
@@ -102,13 +127,13 @@ REPLACEMENTS = [
     (RP, '[data-g="우주항공청"], [data-b="우주항공청"]', '[data-g="조국혁신당"], [data-b="조국혁신당"]', 1, False),
     (RP, '[data-g="과기정통부"], [data-b="과기정통부"]', '[data-g="개혁신당"], [data-b="개혁신당"]', 1, False),
     (RP, '[data-g="김광일 기자"], [data-b="김광일 기자"]',
-         f'[data-g="{REPORTER} 기자"], [data-b="{REPORTER} 기자"]', 1, False),
+         f'[data-g="{TEAM_SECTION}"], [data-b="{TEAM_SECTION}"]', 1, False),
     (RP, '<button type="button" id="sync" class="sync off"',
          '<button type="button" id="sync" class="sync off" style="display:none"', 1, False),
     (RP, "<title>뉴스레이다</title>", f"<title>뉴스레이다 · {BEATS_TITLE}</title>", 1, False),
     (RP, "document.title = '뉴스레이다 · ' + r.title;",
          "document.title = '뉴스레이다(국회) · ' + r.title;", 1, False),
-    (RP, "맨 끝 ‘김광일 기자’는", f"맨 끝 ‘{REPORTER} 기자’는", 1, False),
+    (RP, "맨 끝 ‘김광일 기자’는", f"맨 끝 ‘{TEAM_SECTION}’(팀원 {len(TEAM)}명 기사, 보고 양식에선 &lt;기처리&gt;)은", 1, False),
     (RP, "체크한 기사와 ‘여기까지 확인’은 이 기기에 저장되고, 머리줄 <b>기기 연동</b>을 켜면 다른 기기와 맞춰집니다(내 GitHub 비공개 gist). · <a href=\"../\">최신 다이제스트</a> · <a href=\"../archive/\">지난 다이제스트</a></p>",
          "체크한 기사와 ‘여기까지 확인’은 이 기기(브라우저)에만 저장됩니다 — PC와 폰은 따로 기억합니다.</p>", 1, False),
 ]
@@ -129,7 +154,8 @@ EXPECT = {
     "RETENTION_DAYS": 14,
     "KEYWORD_MAX_PAGES": dict({"CBS": 1}, **{p: 3 for p in PARTIES}, **{a: 0 for a in ABBR}),
     "BYLINE_NAME": REPORTER,
-    "BYLINE_SECTION": f"{REPORTER} 기자",
+    "BYLINE_SECTION": TEAM_SECTION,
+    "BYLINE_NAMES": TEAM,
 }
 
 
