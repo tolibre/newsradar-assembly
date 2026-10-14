@@ -29,10 +29,12 @@ DAILY_PM = ["문화일보", "내일신문", "헤럴드경제"]   # 석간 가점
 BROADCAST = ["TV조선", "JTBC", "채널A", "MBN", "YTN", "연합뉴스TV"]
 WIRE = ["연합뉴스", "뉴시스", "뉴스1"]
 BOOST_BASE, BOOST_SLOT = 1.5, 3.0
+def _set_lit(names):   # 집합 리터럴을 정렬해 쓴다 — set repr은 실행마다 순서가 달라 생성본 md5가 흔들렸다
+    return "{" + ", ".join(repr(x) for x in sorted(set(names))) + "}"
 NEW_BOOST = ("LIVE_MEDIA_BOOST = {\n"
-             f'    "*": [({set(DAILY_AM + DAILY_PM + BROADCAST + WIRE)!r}, {BOOST_BASE})],\n'
-             f'    "am": [({set(DAILY_AM)!r}, {BOOST_SLOT})],\n'
-             f'    "pm": [({set(DAILY_PM)!r}, {BOOST_SLOT})],\n'
+             f'    "*": [({_set_lit(DAILY_AM + DAILY_PM + BROADCAST + WIRE)}, {BOOST_BASE})],\n'
+             f'    "am": [({_set_lit(DAILY_AM)}, {BOOST_SLOT})],\n'
+             f'    "pm": [({_set_lit(DAILY_PM)}, {BOOST_SLOT})],\n'
              "}   # 국회판(생성기)\n")
 BEATS_TITLE = "국회·정당"
 STORE_PREFIX = "nm-asm-"                  # 원본('nm-live-')·재경부판('nm-moef-')과 같은 출처라 반드시 달라야 한다
@@ -85,6 +87,23 @@ NEW_FALLBACK = (
     "                    continue\n"
     f"                kws = {{\"{BODY_SCOOP_GROUP}\"}}\n")
 
+# 같은 사안이 정당 섹션 두 곳에 갈리던 문제(사용자 결정 2026-10-15 — '1번: 사안 단위로 합치기').
+# 섹션은 '제목에 먼저 걸린 정당 단서'로 정해져, 같은 사안이 제목에 與가 있느냐로 갈렸다
+# (10/15 09:00 보고: 北 지뢰 규탄 결의안 민주당 13·국민의힘 14 / 임광현 비서실장 11·21).
+# 원본 LIVE_STORY_MERGE_GROUPS 자리에 정당 4개를 채우면, 보고 전체를 한 번에 묶어 두 섹션 이상에
+# 걸친 사안을 기사가 가장 많은 섹션 하나로 모은다(구간 탭·'전체' 탭·칩·보고 양식 모두 같은 섹션).
+NEW_STORY_MERGE = f"LIVE_STORY_MERGE_GROUPS = {PARTIES!r}   # 국회판(생성기)\n"
+# 정당명·약칭은 묶음 판정 토큰에서 뺀다. 정당 기사 제목엔 거의 늘 정당명이 있어서, 정당명 하나 +
+# 아무 단어 하나로 다른 사안이 이어졌다('[단독] 한미의원연맹 민주당 측 신임 공동회장에 송영길' ↔
+# '민주당, 임광현 신임 비서실장 임명 환영' = {민주당, 신임}). 출입처명 토큰(0-14) 규칙은 겹친
+# 출입처명이 2개 이상이면 같은 사안으로 인정하는데, 정당판에선 {민주당, 국힘}이 사안이 아니다.
+# 위 합치기는 섹션을 넘어 묶으므로 이 다리가 남아 있으면 송영길 [단독]이 국민의힘 섹션으로 끌려간다(실측).
+# 원본에는 넣지 않는다 — 원본 DB 50개 슬롯 중 8개(김승원 청문회·호르무즈 파병 등)의 묶음이 바뀐다.
+STOP_PARTY = sorted(set(PARTIES) | {a for a in ABBR if re.fullmatch(r"[가-힣]{2,}", a)})
+NEW_STOPWORDS = ("# 국회판(생성기): 정당명·약칭은 묶음 판정에서 뺀다 — 정당판에선 사안을 가리키지 않는다.\n"
+                 f"TOPIC_STOPWORDS |= set({STOP_PARTY!r})\n\n"
+                 "def topic_tokens(title):\n")
+
 NM = "news_monitor.py"
 RP = "render_page.py"
 
@@ -110,6 +129,9 @@ REPLACEMENTS = [
     (NM, 'BYLINE_SECTION = "김광일 기자"', f'BYLINE_SECTION = "{TEAM_SECTION}"', 1, False),
     (NM, "BYLINE_NAMES = [BYLINE_NAME]\n", f"BYLINE_NAMES = {TEAM!r}   # 국회팀(생성기)\n", 1, False),
     (NM, "LIVE_MEDIA_BOOST = {}\n", NEW_BOOST, 1, False),
+    # ---- news_monitor.py: 사안 단위 섹션 합치기 + 정당명 묶음 토큰 제외(2026-10-15) ----
+    (NM, "LIVE_STORY_MERGE_GROUPS = []\n", NEW_STORY_MERGE, 1, False),
+    (NM, "def topic_tokens(title):\n", NEW_STOPWORDS, 1, False),
     (NM, "BYLINE_TRUST_META = False\n", "BYLINE_TRUST_META = True   # 국회판(생성기) — 방송 녹취 출연 문구 오탐 방지\n", 1, False),
     # 석간 내일신문을 화이트리스트에 더한다(원본엔 없음 — 없으면 페이지에 아예 안 뜬다)
     (NM, "STORE_NON_WHITELIST = True\n",
@@ -157,6 +179,7 @@ EXPECT = {
     "BYLINE_NAME": REPORTER,
     "BYLINE_SECTION": TEAM_SECTION,
     "BYLINE_NAMES": TEAM,
+    "LIVE_STORY_MERGE_GROUPS": PARTIES,
 }
 
 
