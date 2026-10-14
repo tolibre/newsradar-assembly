@@ -10,7 +10,7 @@
 
 - 치환마다 '원본에서 정확히 몇 번 나와야 하는지'를 적어 두고, 다르면 아무 파일도
   쓰지 않고 멈춘다.
-- 원본 쪽 파일은 읽기만 한다. 함수는 하나도 바꾸지 않는다(설정·문구만).
+- 원본 쪽 파일은 읽기만 한다. 함수는 run_check의 폴백 한 줄(본문 매칭 → [단독]만)을 빼고 바꾸지 않는다.
 """
 import hashlib, os, re, shutil, sys
 
@@ -25,8 +25,16 @@ REPORT_ORDER_JS = "[" + ",".join(f"'{p}'" for p in PARTIES) + "]"
 # '더불어민주당' 9건 vs '민주당' 210건, '국민의힘' 138건 vs '국힘' 223건).
 # 약칭이 KEYWORDS에 없으면 제목 판정이 안 돼 기사가 '먼저 검색한 키워드' 섹션으로 쏠린다.
 # 그래서 약칭을 KEYWORDS에 넣되 네이버 검색은 0페이지로 막아(제목 판정·구글 RSS만) 호출을 늘리지 않는다.
-ABBR = {"민주당": "더불어민주당", "국힘": "국민의힘", "혁신당": "조국혁신당"}
-KW_ORDER = ["더불어민주당", "민주당", "국민의힘", "국힘", "조국혁신당", "혁신당", "개혁신당"]
+# 與·여당 → 더불어민주당, 野·야당 → 국민의힘(제1야당)으로 본다(2026-10-15, 사용자 결정 '관문' — 제목 단서 확대).
+# **정권이 바뀌면 이 두 줄을 바꿔야 한다.**
+ABBR = {"민주당": "더불어민주당", "與": "더불어민주당", "여당": "더불어민주당",
+        "국힘": "국민의힘", "野": "국민의힘", "야당": "국민의힘",
+        "혁신당": "조국혁신당"}
+KW_ORDER = ["더불어민주당", "민주당", "與", "여당", "국민의힘", "국힘", "野", "야당",
+            "조국혁신당", "혁신당", "개혁신당"]
+# 본문에만 정당명이 나오는 기사는 [단독]만 남겨 이 섹션으로 모은다(사용자 결정 2026-10-15:
+# "관문을 달되, 정책 기사라도 단독은 모니터해야"). KEYWORDS에 없는 그룹이라 섹션 맨 뒤에 붙는다.
+BODY_SCOOP_GROUP = "기타 단독"
 
 NEW_BASE_KEYWORDS = "BASE_KEYWORDS = [\n" + \
     "    # 뉴스레이다 국회(정당)판(tools/make_variant.py가 생성 — 직접 고치지 말 것).\n" + \
@@ -42,14 +50,22 @@ NEW_GROUPS_LINE = "KEYWORD_GROUPS.update(DUTY_KEYWORD_GROUPS)\n" + \
 # 약칭 오탐: '개혁신당'에 '혁신당'이 들어 있다. '민주당'은 해외 정당·다른 당명에도 쓰인다.
 NEW_ANTI = '    "누리호":   [r"누리호텔"],\n' + \
     '    "혁신당":   [r"개혁신당"],\n' + \
+    '    "야당":     [r"야당역", r"야당동"],\n' + \
     '    "민주당":   [r"美\\s*민주당", r"미국\\s*민주당", r"미\\s민주당", r"입헌민주당", r"자유민주당", r"국민민주당", r"사회민주당", r"기독교민주당", r"새천년민주당", r"통합민주당"],\n'
 
 # 정당 기사는 부처 기사보다 몇 배 많다. 네이버는 한 번에 100건씩 최대 5페이지(500건)까지만
 # 거슬러 가는데(MAX_PAGES_PER_KEYWORD), 한 시간 새 기사가 그보다 많으면 나머지를 **조용히 놓친다**.
 # 네이버 검색 API의 start 상한(1000)까지 10페이지로 연다. 실측 후 다시 볼 것.
 NEW_MAX_PAGES = "KEYWORD_MAX_PAGES = {\n    \"CBS\": 1,\n" + \
-    "".join(f'    "{p}": 10,\n' for p in PARTIES) + \
+    "".join(f'    "{p}": 3,   # 관문 탈락분은 DB에 안 남아 매번 상한까지 넘긴다 — 300건이면 시간당 수집량의 몇 배\n' for p in PARTIES) + \
     "".join(f'    "{a}": 0,   # 약칭 — 제목 판정용, 네이버 검색 안 함\n' for a in ABBR) + "}\n"
+
+NEW_FALLBACK = (
+    "                # 국회판(생성기, 2026-10-15): 정당명은 거의 모든 정치·정책 기사 본문에 스친다.\n"
+    "                # 본문 매칭은 [단독]만 남겨 '기타 단독' 섹션으로 모은다(사용자 결정).\n"
+    "                if priority_mark(it[\"title\"]) != \"🔥\":\n"
+    "                    continue\n"
+    f"                kws = {{\"{BODY_SCOOP_GROUP}\"}}\n")
 
 NM = "news_monitor.py"
 RP = "render_page.py"
@@ -68,6 +84,9 @@ REPLACEMENTS = [
     # 정당 기사량이면 90일치 DB가 GitHub 파일 한도(100MB)를 넘는다(매시 커밋되는 파일).
     # 라이브 페이지는 사흘치·'이미 나옴'은 24시간·본인 기사는 14일만 쓰므로 14일이면 충분하다.
     (NM, "RETENTION_DAYS = 90 ", "RETENTION_DAYS = 14 ", 1, False),
+    # ---- news_monitor.py: run_check 폴백(국회판에서 유일한 함수 본문 변경) ----
+    (NM, "                kws = {kw}   # 제목엔 없고 본문에만 있는 경우 — 검색어를 그대로 사용\n",
+         NEW_FALLBACK, 1, False),
     # ---- news_monitor.py: 바이라인 ----
     (NM, 'BYLINE_NAME = "김광일"', f'BYLINE_NAME = "{REPORTER}"', 1, False),
     (NM, 'BYLINE_SECTION = "김광일 기자"', f'BYLINE_SECTION = "{REPORTER} 기자"', 1, False),
@@ -108,7 +127,7 @@ EXPECT = {
     "KEYWORDS": KW_ORDER,
     "GROUP_ORDER": PARTIES,
     "RETENTION_DAYS": 14,
-    "KEYWORD_MAX_PAGES": dict({"CBS": 1}, **{p: 10 for p in PARTIES}, **{a: 0 for a in ABBR}),
+    "KEYWORD_MAX_PAGES": dict({"CBS": 1}, **{p: 3 for p in PARTIES}, **{a: 0 for a in ABBR}),
     "BYLINE_NAME": REPORTER,
     "BYLINE_SECTION": f"{REPORTER} 기자",
 }
