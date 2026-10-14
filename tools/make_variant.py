@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""뉴스레이다 국회(정당)판(박정환 기자용) 생성기.
+
+원본(tolibre/news-monitor — 김광일 기자 출입처판)의 파일을 그대로 가져와
+'검색어·바이라인·브라우저 저장키·보관 기간' 같은 설정만 바꿔 이 저장소에 쓴다.
+(재경부판 tolibre/newsradar-moef의 생성기와 같은 구조 — 설정 블록만 다르다.)
+
+  python tools/make_variant.py <원본 저장소 경로> [<출력 경로, 기본=이 저장소>]
+
+- 치환마다 '원본에서 정확히 몇 번 나와야 하는지'를 적어 두고, 다르면 아무 파일도
+  쓰지 않고 멈춘다.
+- 원본 쪽 파일은 읽기만 한다. 함수는 하나도 바꾸지 않는다(설정·문구만).
+"""
+import hashlib, os, re, shutil, sys
+
+# ---------------------------------------------------------------- 설정값 ---
+REPORTER = "박정환"
+BEATS_TITLE = "국회·정당"
+STORE_PREFIX = "nm-asm-"                  # 원본('nm-live-')·재경부판('nm-moef-')과 같은 출처라 반드시 달라야 한다
+PARTIES = ["더불어민주당", "국민의힘", "조국혁신당", "개혁신당"]   # 사용자가 준 순서 = 섹션 순서
+REPORT_ORDER_JS = "[" + ",".join(f"'{p}'" for p in PARTIES) + "]"
+
+# 제목에는 정식 명칭보다 약칭이 압도적으로 많다(원본 DB 9/14~10/14 제목 실측:
+# '더불어민주당' 9건 vs '민주당' 210건, '국민의힘' 138건 vs '국힘' 223건).
+# 약칭이 KEYWORDS에 없으면 제목 판정이 안 돼 기사가 '먼저 검색한 키워드' 섹션으로 쏠린다.
+# 그래서 약칭을 KEYWORDS에 넣되 네이버 검색은 0페이지로 막아(제목 판정·구글 RSS만) 호출을 늘리지 않는다.
+ABBR = {"민주당": "더불어민주당", "국힘": "국민의힘", "혁신당": "조국혁신당"}
+KW_ORDER = ["더불어민주당", "민주당", "국민의힘", "국힘", "조국혁신당", "혁신당", "개혁신당"]
+
+NEW_BASE_KEYWORDS = "BASE_KEYWORDS = [\n" + \
+    "    # 뉴스레이다 국회(정당)판(tools/make_variant.py가 생성 — 직접 고치지 말 것).\n" + \
+    "    # 약칭(민주당·국힘·혁신당)은 제목 판정용 — 네이버 검색은 KEYWORD_MAX_PAGES 0으로 막았다.\n" + \
+    "".join(f'    "{k}",\n' for k in KW_ORDER) + "]\n"
+
+# 정당명·약칭을 KEYWORD_GROUPS에 넣는다. ①약칭 → 정식 그룹 ②정당명이 클러스터링의
+# '출입처명 토큰'(CLUSTER_AGENCY_TOKENS — KEYWORD_GROUPS에서 유도)에 들어가야
+# '국힘' 한 단어로 서로 다른 사안이 묶이지 않는다(원본 0-14와 같은 구조).
+NEW_GROUPS_LINE = "KEYWORD_GROUPS.update(DUTY_KEYWORD_GROUPS)\n" + \
+    "KEYWORD_GROUPS.update(" + repr(dict({p: p for p in PARTIES}, **ABBR)) + ")   # 국회판(생성기)\n"
+
+# 약칭 오탐: '개혁신당'에 '혁신당'이 들어 있다. '민주당'은 해외 정당·다른 당명에도 쓰인다.
+NEW_ANTI = '    "누리호":   [r"누리호텔"],\n' + \
+    '    "혁신당":   [r"개혁신당"],\n' + \
+    '    "민주당":   [r"美\\s*민주당", r"미국\\s*민주당", r"미\\s민주당", r"입헌민주당", r"자유민주당", r"국민민주당", r"사회민주당", r"기독교민주당", r"새천년민주당", r"통합민주당"],\n'
+
+# 정당 기사는 부처 기사보다 몇 배 많다. 네이버는 한 번에 100건씩 최대 5페이지(500건)까지만
+# 거슬러 가는데(MAX_PAGES_PER_KEYWORD), 한 시간 새 기사가 그보다 많으면 나머지를 **조용히 놓친다**.
+# 네이버 검색 API의 start 상한(1000)까지 10페이지로 연다. 실측 후 다시 볼 것.
+NEW_MAX_PAGES = "KEYWORD_MAX_PAGES = {\n    \"CBS\": 1,\n" + \
+    "".join(f'    "{p}": 10,\n' for p in PARTIES) + \
+    "".join(f'    "{a}": 0,   # 약칭 — 제목 판정용, 네이버 검색 안 함\n' for a in ABBR) + "}\n"
+
+NM = "news_monitor.py"
+RP = "render_page.py"
+
+REPLACEMENTS = [
+    # ---- news_monitor.py: 검색어 ----
+    (NM, r"DUTY_DATES = \{\n(?:    .*\n)*?\}\n",
+         "DUTY_DATES = {}   # 국회판은 당직 모드를 쓰지 않는다\n", 1, True),
+    (NM, r"BASE_KEYWORDS = \[\n(?:.*\n)*?\]\n", NEW_BASE_KEYWORDS, 1, True),
+    (NM, 'TEMP_KEYWORDS = {\n    "대미투자": "2026-09-23",\n}\n',
+         "TEMP_KEYWORDS = {}\n", 1, False),
+    (NM, 'KEYWORD_MAX_PAGES = {\n    "CBS": 1,\n}\n', NEW_MAX_PAGES, 1, False),
+    (NM, "KEYWORD_GROUPS.update(DUTY_KEYWORD_GROUPS)\n", NEW_GROUPS_LINE, 1, False),
+    (NM, '    "누리호":   [r"누리호텔"],\n', NEW_ANTI, 1, False),
+    # ---- news_monitor.py: 보관 기간 ----
+    # 정당 기사량이면 90일치 DB가 GitHub 파일 한도(100MB)를 넘는다(매시 커밋되는 파일).
+    # 라이브 페이지는 사흘치·'이미 나옴'은 24시간·본인 기사는 14일만 쓰므로 14일이면 충분하다.
+    (NM, "RETENTION_DAYS = 90 ", "RETENTION_DAYS = 14 ", 1, False),
+    # ---- news_monitor.py: 바이라인 ----
+    (NM, 'BYLINE_NAME = "김광일"', f'BYLINE_NAME = "{REPORTER}"', 1, False),
+    (NM, 'BYLINE_SECTION = "김광일 기자"', f'BYLINE_SECTION = "{REPORTER} 기자"', 1, False),
+
+    # ---- render_page.py ----
+    (RP, "var REPORT_ORDER = ['방미통위','공정위','과기정통부','우주항공청'];",
+         f"var REPORT_ORDER = {REPORT_ORDER_JS};", 2, False),
+    (RP, "출입처 순서(방미통위 → 공정위 → 과기정통부 → 우주청 → 2진)",
+         "정당 순서(" + " → ".join(PARTIES) + ")", 2, False),
+    (RP, "'nm-live-", f"'{STORE_PREFIX}", 6, False),
+    (RP, '[data-g="공정위"], [data-b="공정위"]', '[data-g="더불어민주당"], [data-b="더불어민주당"]', 1, False),
+    (RP, '[data-g="방미통위"], [data-b="방미통위"]', '[data-g="국민의힘"], [data-b="국민의힘"]', 1, False),
+    (RP, '[data-g="우주항공청"], [data-b="우주항공청"]', '[data-g="조국혁신당"], [data-b="조국혁신당"]', 1, False),
+    (RP, '[data-g="과기정통부"], [data-b="과기정통부"]', '[data-g="개혁신당"], [data-b="개혁신당"]', 1, False),
+    (RP, '[data-g="김광일 기자"], [data-b="김광일 기자"]',
+         f'[data-g="{REPORTER} 기자"], [data-b="{REPORTER} 기자"]', 1, False),
+    (RP, '<button type="button" id="sync" class="sync off"',
+         '<button type="button" id="sync" class="sync off" style="display:none"', 1, False),
+    (RP, "<title>뉴스레이다</title>", f"<title>뉴스레이다 · {BEATS_TITLE}</title>", 1, False),
+    (RP, "document.title = '뉴스레이다 · ' + r.title;",
+         "document.title = '뉴스레이다(국회) · ' + r.title;", 1, False),
+    (RP, "맨 끝 ‘김광일 기자’는", f"맨 끝 ‘{REPORTER} 기자’는", 1, False),
+    (RP, "체크한 기사와 ‘여기까지 확인’은 이 기기에 저장되고, 머리줄 <b>기기 연동</b>을 켜면 다른 기기와 맞춰집니다(내 GitHub 비공개 gist). · <a href=\"../\">최신 다이제스트</a> · <a href=\"../archive/\">지난 다이제스트</a></p>",
+         "체크한 기사와 ‘여기까지 확인’은 이 기기(브라우저)에만 저장됩니다 — PC와 폰은 따로 기억합니다.</p>", 1, False),
+]
+
+# 원본에서 그대로 가져오는 파일(치환 없음)
+COPY_AS_IS = ["merge_db.py", "retitle.py"]
+
+# 페이지에 남아 있으면 안 되는 문자열 — 주석(# / //)이 아닌 줄에서만 검사한다.
+# (news_monitor.py는 문자열 대신 아래 EXPECT로 '실제로 import했을 때의 값'을 검사한다.
+#  원본의 우주항공청·CBS 매핑·소관 어휘는 남아 있어도 검색어가 아니면 무해하다.)
+FORBIDDEN = {
+    RP: ["nm-live-", "김광일 기자\"", "기기 연동</b>", "방미통위 → 공정위"],
+}
+# 생성한 news_monitor.py를 별도 프로세스로 import해 확인할 값(당직·임시 키워드가 꺼진 날짜 기준).
+EXPECT = {
+    "KEYWORDS": KW_ORDER,
+    "GROUP_ORDER": PARTIES,
+    "RETENTION_DAYS": 14,
+    "KEYWORD_MAX_PAGES": dict({"CBS": 1}, **{p: 10 for p in PARTIES}, **{a: 0 for a in ABBR}),
+    "BYLINE_NAME": REPORTER,
+    "BYLINE_SECTION": f"{REPORTER} 기자",
+}
+
+
+def md5(b):
+    return hashlib.md5(b).hexdigest()
+
+
+def apply(src_dir):
+    out = {}
+    for fname in {r[0] for r in REPLACEMENTS}:
+        with open(os.path.join(src_dir, fname), encoding="utf-8") as f:
+            out[fname] = f.read()
+    errors = []
+    for fname, old, new, count, is_re in REPLACEMENTS:
+        text = out[fname]
+        found = len(re.findall(old, text)) if is_re else text.count(old)
+        if found != count:
+            errors.append(f"{fname}: {old[:60]!r} — {count}번이어야 하는데 {found}번")
+            continue
+        out[fname] = re.sub(old, lambda m: new, text) if is_re else text.replace(old, new)
+    if errors:
+        raise SystemExit("원본이 예상과 달라 생성을 멈춥니다(아무 파일도 쓰지 않음):\n  "
+                         + "\n  ".join(errors))
+    leftovers = []
+    for fname, pats in FORBIDDEN.items():
+        for i, line in enumerate(out[fname].splitlines(), 1):
+            s = line.strip()
+            if s.startswith("#") or s.startswith("//"):
+                continue
+            for p in pats:
+                if p in line:
+                    leftovers.append(f"{fname}:{i}: {p!r} — {s[:80]}")
+    if leftovers:
+        raise SystemExit("원본 고유 문자열이 남았습니다:\n  " + "\n  ".join(leftovers))
+    return out
+
+
+def main():
+    if len(sys.argv) < 2:
+        raise SystemExit(__doc__)
+    src = os.path.abspath(sys.argv[1])
+    dst = os.path.abspath(sys.argv[2] if len(sys.argv) > 2 else
+                          os.path.join(os.path.dirname(__file__), ".."))
+    out = apply(src)
+    # 먼저 임시 폴더에 써서 import 검사를 통과한 뒤에만 실제 위치로 옮긴다.
+    import json, subprocess, tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        for fname, text in out.items():
+            with open(os.path.join(tmp, fname), "w", encoding="utf-8") as f:
+                f.write(text)
+        probe = ("import json, news_monitor as m; print(json.dumps({k: getattr(m, k) for k in %r}, "
+                 "ensure_ascii=False))" % list(EXPECT))
+        env = dict(os.environ, DUTY_MODE="")
+        r = subprocess.run([sys.executable, "-c", probe], cwd=tmp, env=env,
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            raise SystemExit("생성본 import 실패:\n" + r.stderr[-2000:])
+        got = json.loads(r.stdout.strip().splitlines()[-1])
+        bad = {k: (got.get(k), v) for k, v in EXPECT.items() if got.get(k) != v}
+        if bad:
+            raise SystemExit(f"생성본 설정값이 예상과 다릅니다: {bad}")
+    for fname, text in sorted(out.items()):
+        with open(os.path.join(dst, fname), "w", encoding="utf-8") as f:
+            f.write(text)
+    for fname in COPY_AS_IS:
+        shutil.copyfile(os.path.join(src, fname), os.path.join(dst, fname))
+    for fname in sorted(list(out) + COPY_AS_IS):
+        with open(os.path.join(src, fname), "rb") as a, open(os.path.join(dst, fname), "rb") as b:
+            print(f"{fname:18s} 원본 {md5(a.read())} → 생성 {md5(b.read())}")
+
+
+if __name__ == "__main__":
+    main()

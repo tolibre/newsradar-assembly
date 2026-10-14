@@ -1,0 +1,156 @@
+name: newsradar-assembly
+
+# 뉴스레이다 국회(정당)판(박정환 기자용). 원본: tolibre/news-monitor.
+# 코드는 tools/make_variant.py가 원본에서 생성한다 — news_monitor.py·render_page.py를
+# 직접 고치지 말고 생성기의 치환 목록을 고칠 것.
+#
+# 실행은 원본과 같이 외부 스케줄러(cron-job.org)가 workflow_dispatch로 부른다.
+# GitHub Actions 자체 schedule은 쓰지 않는다(원본에서 신뢰 불가로 검증됨).
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '실행 모드'
+        required: false
+        default: 'check'
+        type: choice
+        options: [check, digest, live, excluded, retitle]
+      apply:
+        description: 'retitle 전용: 1이면 복구한 제목을 실제로 DB에 기록. 비우면 드라이런.'
+        required: false
+        default: ''
+        type: string
+      limit:
+        description: 'retitle 전용: 최근 수집분부터 N건만 처리. 비우면 대상 전체.'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: newsradar-assembly
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: 파이썬 설치
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: 모드 결정 (외부 호출 input 사용)
+        id: mode
+        run: |
+          INPUT_MODE="${{ github.event.inputs.mode }}"
+          echo "mode=${INPUT_MODE:-check}" >> "$GITHUB_OUTPUT"
+
+      - name: 실행
+        env:
+          # 원본과 같은 네이버 앱 키를 써도 된다(하루 한도 25,000회 — 두 판 합쳐도 수 %).
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          # 실시간 알림(check)은 아직 쓰지 않는다 — 비밀값이 없으면 알림은 로그로만 찍힌다.
+          # 나중에 텔레그램 알림을 켜려면 이 두 비밀값만 등록하면 된다.
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # digest는 06:00 DB 정리(prune_old, 14일)용으로만 돈다 — 페이지·텔레그램 없음.
+          PAGE_MODE: 'off'
+          DIGEST_PUSH: ''
+          APPLY: ${{ github.event.inputs.apply }}
+          LIMIT: ${{ github.event.inputs.limit }}
+        run: |
+          MODE="${{ steps.mode.outputs.mode }}"
+          if [ "$MODE" = "retitle" ]; then
+            python retitle.py
+          elif [ "$MODE" = "check" ]; then
+            python news_monitor.py check
+            # 라이브 보고 페이지(docs/live/data.json) 갱신. 실패해도 check 결과(DB)는 커밋한다.
+            python news_monitor.py live || echo "::warning::live 페이지 갱신 실패 — check 결과는 정상 커밋됩니다."
+          else
+            python news_monitor.py "$MODE"
+          fi
+
+      - name: DB·페이지 변경사항 커밋 (다음 실행에서 중복 방지용 + GitHub Pages 갱신)
+        # backfill은 DB를 건드리지 않으므로 커밋 단계를 통째로 건너뛴다.
+        # (불필요한 git 왕복은 동시 실행 시 push 경합 위험만 늘린다)
+        # docs/는 PAGE_MODE=off(기본값)나 digest가 아닌 모드에서는 애초에 아무것도
+        # 생성/변경되지 않으므로, 폴더가 없으면 git add 자체를 건너뛴다.
+        if: steps.mode.outputs.mode != 'backfill'
+        run: |
+          git config user.name "news-monitor-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add news_monitor.db
+          # 0-17: index.html 한 장이 아니라 docs/ 전체를 담는다. -A라야 아카이브
+          # 추가분뿐 아니라 prune_archive()가 지운 오래된 보존본의 '삭제'까지
+          # 스테이징된다(git add <경로>만으로는 삭제가 반영되지 않는다).
+          if [ -d docs ]; then git add -A docs; fi
+          # 0-30: 체크 기록 수확본(picks/). 보고마다 한 파일이고 수확(harvest_picks.py)만 쓴다.
+          if [ -d picks ]; then git add -A picks; fi
+          if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
+
+          # 0-20: 이번 실행이 docs/에서 '실제로 바꾼 파일'만 목록으로 기록하고 사본을
+          # 대피시킨다. 아래 경합 복구에서 원격 위에 되얹는 것은 이 파일들뿐이다.
+          #   0-19까지는 "docs를 바꾼 실행이면 docs/ 전체를 되얹기"였다. 그런데 0-20부터
+          #   check도 docs/live/data.json을 바꾸므로, 그 규칙이면 check가 경합에 졌을 때
+          #   자기 체크아웃 시점의 낡은 docs/index.html까지 되얹어 digest 페이지를
+          #   롤백시킨다(0-19 사고의 재발). 파일 단위로 좁히면 check는 live만, digest는
+          #   index.html·archive만 되얹어 서로의 산출물을 건드리지 않는다.
+          KEEP="${RUNNER_TEMP:-/tmp}/nm-keep"
+          rm -rf "$KEEP"; mkdir -p "$KEEP/files"
+          # 0-30: picks/도 같은 방식으로 대피·되얹기(수확한 실행만 picks 파일을 바꾼다).
+          git diff --cached --name-only --diff-filter=d -- docs picks > "$KEEP/docs-changed.txt"
+          git diff --cached --name-only --diff-filter=D -- docs picks > "$KEEP/docs-deleted.txt"
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            mkdir -p "$KEEP/files/$(dirname "$f")" && cp "$f" "$KEEP/files/$f"
+          done < "$KEEP/docs-changed.txt"
+          echo "docs 변경: $(wc -l < "$KEEP/docs-changed.txt")개 추가·수정, $(wc -l < "$KEEP/docs-deleted.txt")개 삭제"
+          git commit -m "update db/page [skip ci]"
+
+          # ---------------- push (0-18, 2026-09-20) ----------------
+          # 예전에는 push가 거절되면 `git pull --rebase`로 따라잡았다. 그런데
+          # news_monitor.db는 43MB 바이너리라 git이 병합하지 못하고 반드시
+          #     warning: Cannot merge binary files: news_monitor.db
+          #     CONFLICT (content): Merge conflict in news_monitor.db
+          # 로 끝난다. 재시도해도 결정론적으로 같은 충돌이라 5회 전부 실패하고,
+          # 그 실행이 만든 다이제스트 페이지가 통째로 유실된다
+          # (2026-09-20 22:00 실측 — 인수인계 5항 8번이 현실화한 사고).
+          #
+          # 그래서 rebase를 쓰지 않는다. 원격 상태로 되돌린 뒤 우리 산출물을 다시
+          # 얹고, DB는 merge_db.py로 '행 단위 합집합'을 만든다 — check가 모은
+          # 기사와 digest가 남긴 제외기록이 모두 살아남는다.
+          pushed=0
+          for i in 1 2 3 4 5; do
+            if git push; then pushed=1; break; fi
+            echo "push 거절(원격이 앞섬) — 원격과 합칩니다 ($i/5)"
+            cp news_monitor.db "$KEEP/ours.db"
+            if ! git fetch origin main; then sleep 5; continue; fi
+            # 원격을 그대로 바탕으로 깐다(우리 커밋은 버린다 — 내용은 위에 보관됨)
+            git reset --hard origin/main
+            # 이번 실행이 바꾼 docs 파일만 다시 얹는다(0-20). 원격이 새로 올린
+            # 다른 파일(다른 실행의 페이지·아카이브)은 그대로 남는다.
+            cp -r "$KEEP/files/." .
+            while IFS= read -r f; do
+              [ -n "$f" ] && git rm -q --ignore-unmatch -- "$f"
+            done < "$KEEP/docs-deleted.txt"
+            python merge_db.py "$KEEP/ours.db" news_monitor.db
+            git add news_monitor.db
+            if [ -d docs ]; then git add -A docs; fi
+            if [ -d picks ]; then git add -A picks; fi
+            if git diff --cached --quiet; then
+              echo "합친 결과가 원격과 동일 — 올릴 것이 없습니다."
+              pushed=1; break
+            fi
+            git commit -m "update db/page [skip ci]"
+            sleep $((RANDOM % 5 + 2))
+          done
+          if [ "$pushed" -ne 1 ]; then
+            echo "::error::DB push 5회 모두 실패 — news_monitor.db가 저장소에 반영되지 않았습니다."
+            exit 1
+          fi
