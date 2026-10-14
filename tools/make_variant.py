@@ -110,6 +110,7 @@ REPLACEMENTS = [
     (NM, 'BYLINE_SECTION = "김광일 기자"', f'BYLINE_SECTION = "{TEAM_SECTION}"', 1, False),
     (NM, "BYLINE_NAMES = [BYLINE_NAME]\n", f"BYLINE_NAMES = {TEAM!r}   # 국회팀(생성기)\n", 1, False),
     (NM, "LIVE_MEDIA_BOOST = {}\n", NEW_BOOST, 1, False),
+    (NM, "BYLINE_TRUST_META = False\n", "BYLINE_TRUST_META = True   # 국회판(생성기) — 방송 녹취 출연 문구 오탐 방지\n", 1, False),
     # 석간 내일신문을 화이트리스트에 더한다(원본엔 없음 — 없으면 페이지에 아예 안 뜬다)
     (NM, "STORE_NON_WHITELIST = True\n",
          "STORE_NON_WHITELIST = True\nMEDIA_DOMAINS.add(\"naeil.com\"); MEDIA_NAMES.add(\"내일신문\")   # 국회판(생성기)\n", 1, False),
