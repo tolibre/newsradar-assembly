@@ -73,7 +73,7 @@ section, .beat{--og:var(--o-etc); --ob:var(--o-etc-bg)}
 [data-g="개혁신당"], [data-b="개혁신당"]{--og:var(--o-msit); --ob:var(--o-msit-bg)}
 [data-g="국민의힘"], [data-b="국민의힘"]{--og:var(--o-kcc); --ob:var(--o-kcc-bg)}
 [data-g="조국혁신당"], [data-b="조국혁신당"]{--og:var(--o-kasa); --ob:var(--o-kasa-bg)}
-[data-g="박정환 기자"], [data-b="박정환 기자"]{--og:var(--o-me); --ob:var(--o-me-bg)}
+[data-g="CBS 국회팀"], [data-b="CBS 국회팀"]{--og:var(--o-me); --ob:var(--o-me-bg)}
 
 *{box-sizing:border-box}
 [hidden]{display:none !important}
@@ -830,7 +830,7 @@ a.title:visited{color:var(--ink-900)}
       html += part;
     });
     if(t.all && !MERGED) html += drawByline(t.rep, now).html;
-    html += '<p class="foot">구간은 기사 <b>수집 시각</b> 기준입니다(발행 시각은 오른쪽 숫자). 끝난 구간에는 늦게 잡힌 기사가 끼어들지 않고 다음 구간에 들어갑니다. 수집 경로만 바뀌어 다시 들어온 기사(직전 24시간에 같은 제목이 이미 수집됨)는 회색 바탕에 “이미 나옴” 배지로 표시하고 건수에서 뺍니다. ‘전체’는 보고 기간 전체를 출입처·기사묶음으로 다시 묶어 보여주고(구간이 달라도 같은 사안이면 한 묶음), 줄 앞 번호가 들어온 구간입니다. 맨 끝 ‘박정환 기자’는 발행 시각 기준(09:00 보고 당일 00:00~, 14:00 보고 당일 08:00~)입니다. 체크한 기사와 ‘여기까지 확인’은 이 기기(브라우저)에만 저장됩니다 — PC와 폰은 따로 기억합니다.</p>';
+    html += '<p class="foot">구간은 기사 <b>수집 시각</b> 기준입니다(발행 시각은 오른쪽 숫자). 끝난 구간에는 늦게 잡힌 기사가 끼어들지 않고 다음 구간에 들어갑니다. 수집 경로만 바뀌어 다시 들어온 기사(직전 24시간에 같은 제목이 이미 수집됨)는 회색 바탕에 “이미 나옴” 배지로 표시하고 건수에서 뺍니다. ‘전체’는 보고 기간 전체를 출입처·기사묶음으로 다시 묶어 보여주고(구간이 달라도 같은 사안이면 한 묶음), 줄 앞 번호가 들어온 구간입니다. 맨 끝 ‘CBS 국회팀’(팀원 8명 기사, 보고 양식에선 &lt;기처리&gt;)은 발행 시각 기준(09:00 보고 당일 00:00~, 14:00 보고 당일 08:00~)입니다. 체크한 기사와 ‘여기까지 확인’은 이 기기(브라우저)에만 저장됩니다 — PC와 폰은 따로 기억합니다.</p>';
     document.getElementById('main').innerHTML = html;
     syncBar();
   }
@@ -973,11 +973,11 @@ a.title:visited{color:var(--ink-900)}
   // 체크했든 <기처리>로 보낸다. 링크가 같거나, 제목(공백·문장부호 뺀 것)이 같으면 같은 기사.
   function tnorm(t){ return String(t).replace(/[^0-9A-Za-z가-힣]/g, ''); }
   function bylineIndex(rep){
-    var m = {links:{}, titles:{}, tag:''}, b = rep.byline;
+    var m = {links:{}, titles:{}, tag:'', w:{}}, b = rep.byline;
     if(!b) return m;
     m.tag = String(b.name || '').replace(/\s*기자$/, '');
     (b.groups[0] ? b.groups[0].clusters : []).forEach(function(c, ci){
-      c.forEach(function(it){ if(it.l) m.links[it.l] = ci; m.titles[tnorm(it.t)] = ci; });
+      c.forEach(function(it){ if(it.l) m.links[it.l] = ci; m.titles[tnorm(it.t)] = ci; if(it.w) m.w[ci] = it.w; });
     });
     return m;
   }
@@ -1013,7 +1013,8 @@ a.title:visited{color:var(--ink-900)}
       mine.sort(function(a,b){ return a.bi - b.bi; });
       if(lines.length) lines.push('');
       lines.push('<기처리>');
-      mine.forEach(function(it){ lines.push(it.t + '(' + bx.tag + ')'); });
+      // 팀 모드(0-32)면 기사마다 쓴 기자 이름(w), 아니면 섹션 이름
+      mine.forEach(function(it){ lines.push(it.t + '(' + (bx.w[it.bi] || bx.tag) + ')'); });
     }
     return {text: lines.join('\n'), n: items.length + mine.length};
   }
