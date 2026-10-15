@@ -133,7 +133,11 @@ REPLACEMENTS = [
     (NM, 'BYLINE_NAME = "김광일"', f'BYLINE_NAME = "{REPORTER}"', 1, False),
     (NM, 'BYLINE_SECTION = "김광일 기자"', f'BYLINE_SECTION = "{TEAM_SECTION}"', 1, False),
     (NM, "BYLINE_NAMES = [BYLINE_NAME]\n", f"BYLINE_NAMES = {TEAM!r}   # 국회팀(생성기)\n", 1, False),
-    (NM, "LIVE_MEDIA_BOOST = {}\n", NEW_BOOST, 1, False),
+    (NM, 'LIVE_MEDIA_BOOST = {"*": [(LIVE_MEDIA_MAJOR, 1.0)]}\n', NEW_BOOST, 1, False),
+    # 원본 0-35(주체 출입처 배정·'전체' 탭 주체 가점)는 국회판에선 끈다 — 배정은 정당 주체 판정(party_actor)이 하고,
+    # 주체 가점은 박 기자 요청이 아니다.
+    (NM, "ACTOR_ASSIGN = True\n", "ACTOR_ASSIGN = False   # 국회판(생성기) — 배정은 GROUP_ASSIGN_HOOK(정당 주체)\n", 1, False),
+    (NM, "LIVE_ACTOR_BONUS = 2.0\n", "LIVE_ACTOR_BONUS = 0   # 국회판(생성기)\n", 1, False),
     # ---- news_monitor.py: 사안 단위 섹션 합치기 + 정당명 묶음 토큰 제외(2026-10-15) ----
     (NM, "LIVE_STORY_MERGE_GROUPS = []\n", NEW_STORY_MERGE, 1, False),
     (NM, "def topic_tokens(title):\n", NEW_STOPWORDS, 1, False),
@@ -186,6 +190,8 @@ EXPECT = {
     "BYLINE_SECTION": TEAM_SECTION,
     "BYLINE_NAMES": TEAM,
     "LIVE_STORY_MERGE_GROUPS": PARTIES,
+    "ACTOR_ASSIGN": False,
+    "LIVE_ACTOR_BONUS": 0,
 }
 
 
