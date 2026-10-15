@@ -104,6 +104,11 @@ NEW_STOPWORDS = ("# 국회판(생성기): 정당명·약칭은 묶음 판정에�
                  f"TOPIC_STOPWORDS |= set({STOP_PARTY!r})\n\n"
                  "def topic_tokens(title):\n")
 
+# 발언·행위 주체 정당으로 섹션 배정(사용자 결정 2026-10-15). 판정 코드·인물 명단은 tools/party_actor.py —
+# 원본 GROUP_ASSIGN_HOOK 자리(digest_by_group 바로 앞)에 그 파일 내용을 그대로 넣는다.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "party_actor.py"), encoding="utf-8") as _f:
+    NEW_ASSIGN_HOOK = _f.read()
+
 NM = "news_monitor.py"
 RP = "render_page.py"
 
@@ -132,6 +137,7 @@ REPLACEMENTS = [
     # ---- news_monitor.py: 사안 단위 섹션 합치기 + 정당명 묶음 토큰 제외(2026-10-15) ----
     (NM, "LIVE_STORY_MERGE_GROUPS = []\n", NEW_STORY_MERGE, 1, False),
     (NM, "def topic_tokens(title):\n", NEW_STOPWORDS, 1, False),
+    (NM, "GROUP_ASSIGN_HOOK = None\n", NEW_ASSIGN_HOOK, 1, False),
     (NM, "BYLINE_TRUST_META = False\n", "BYLINE_TRUST_META = True   # 국회판(생성기) — 방송 녹취 출연 문구 오탐 방지\n", 1, False),
     # 석간 내일신문을 화이트리스트에 더한다(원본엔 없음 — 없으면 페이지에 아예 안 뜬다)
     (NM, "STORE_NON_WHITELIST = True\n",
