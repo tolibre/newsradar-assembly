@@ -109,6 +109,20 @@ NEW_STOPWORDS = ("# 국회판(생성기): 정당명·약칭은 묶음 판정에�
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "party_actor.py"), encoding="utf-8") as _f:
     NEW_ASSIGN_HOOK = _f.read()
 
+# 사진 기사 추가 규칙(사용자 요청 2026-10-15 "박정환 페이지에 사진 기사가 너무 많다") — 원본 CAPTION_EXTRA 자리.
+# R1 관형어 + (이름) + 정당 + 직함으로 끝남: '물 마시는 정점식 국민의힘 원내대표'·'퇴장한 국민의힘 의원들'
+#    (관형어 끝 글자 는·은·한·된·빈·던·친·운·른·낸 — 이름 끝 글자로 흔한 인·선·진은 뺌, '…에 이기인 전 사무총장' 같은 인사 기사 제외)
+# R2 장면 명사로 끝남: '…회의에서 발언'·'인선 관련 브리핑'·'텅 빈 국민의힘 의원 자리'(퇴장·입장은 기사 제목에도 흔해 뺌)
+# R3 낫표 사진 태그: '「M포토」 …'
+_POS = ("대표|원내대표|최고위원|의원|위원장|부위원장|대변인|수석대변인|원내대변인|사무총장|의장|부의장|장관|차관|총리|"
+        "정책위의장|원내수석부대표|후보자|비대위원장|비상대책위원장|시장|지사|대사|대통령|위원")
+NEW_CAPTION = (
+    "CAPTION_EXTRA = [   # 국회판(생성기) — 사진 설명형 제목\n"
+    f"    (re.compile(r\"(?:^|(?<!에)\\s)[가-힣]*(?:는|은|한|된|빈|던|친|운|른|낸)\\s(?:\\S+\\s+){{0,4}}\\S*(?:{_POS})들?$\"), 45, False),\n"
+    "    (re.compile(r\"\\s(?:발언|모두발언|인사말|브리핑|기념촬영|대화|악수|자리|모습|박수|묵념|경례|건배|포즈|미소)$\"), 40, False),\n"
+    "    (re.compile(r\"「[^」]*(?:포토|사진|pic)[^」]*」\", re.I), 0, True),\n"
+    "]\n")
+
 NM = "news_monitor.py"
 RP = "render_page.py"
 
@@ -142,6 +156,7 @@ REPLACEMENTS = [
     (NM, "LIVE_STORY_MERGE_GROUPS = []\n", NEW_STORY_MERGE, 1, False),
     (NM, "def topic_tokens(title):\n", NEW_STOPWORDS, 1, False),
     (NM, "GROUP_ASSIGN_HOOK = None\n", NEW_ASSIGN_HOOK, 1, False),
+    (NM, "CAPTION_EXTRA = []\n", NEW_CAPTION, 1, False),
     (NM, "BYLINE_TRUST_META = False\n", "BYLINE_TRUST_META = True   # 국회판(생성기) — 방송 녹취 출연 문구 오탐 방지\n", 1, False),
     # 석간 내일신문을 화이트리스트에 더한다(원본엔 없음 — 없으면 페이지에 아예 안 뜬다)
     (NM, "STORE_NON_WHITELIST = True\n",
