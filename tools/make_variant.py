@@ -156,7 +156,7 @@ REPLACEMENTS = [
     (NM, "LIVE_STORY_MERGE_GROUPS = []\n", NEW_STORY_MERGE, 1, False),
     (NM, "def topic_tokens(title):\n", NEW_STOPWORDS, 1, False),
     (NM, "GROUP_ASSIGN_HOOK = None\n", NEW_ASSIGN_HOOK, 1, False),
-    (NM, "CAPTION_EXTRA = []\n", NEW_CAPTION, 1, False),
+    (NM, r"CAPTION_EXTRA = \[\n(?:    .*\n)*?\]\n", NEW_CAPTION, 1, True),
     (NM, "BYLINE_TRUST_META = False\n", "BYLINE_TRUST_META = True   # 국회판(생성기) — 방송 녹취 출연 문구 오탐 방지\n", 1, False),
     # 석간 내일신문을 화이트리스트에 더한다(원본엔 없음 — 없으면 페이지에 아예 안 뜬다)
     (NM, "STORE_NON_WHITELIST = True\n",
