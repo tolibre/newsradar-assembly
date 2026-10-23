@@ -185,6 +185,8 @@ REPLACEMENTS = [
     (RP, '<button type="button" id="sync" class="sync off"',
          '<button type="button" id="sync" class="sync off" style="display:none"', 1, False),
     (RP, "<title>뉴스레이다</title>", f"<title>뉴스레이다 · {BEATS_TITLE}</title>", 1, False),
+    # 0-75: 머리줄 판 주인(사용자 10/23 "이 페이지가 누구의 판인지 각자의 이름을 써주면 좋겠어. 출입처명도 간략히")
+    (RP, '<span class="who">김광일<span class="whob"> (과학·방송·경쟁 담당)</span></span>', '<span class="who">박정환<span class="whob"> (국회)</span></span>', 1, False),
     (RP, "document.title = '뉴스레이다 · ' + r.title;",
          "document.title = '뉴스레이다(국회) · ' + r.title;", 1, False),
     (RP, "맨 끝 ‘김광일 기자’는", f"맨 끝 ‘{TEAM_SECTION}’(팀원 {len(TEAM)}명 기사, 보고 양식에선 &lt;기처리&gt;)은", 1, False),
