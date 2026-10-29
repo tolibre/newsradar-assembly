@@ -85,6 +85,7 @@ NEW_FALLBACK = (
     "                # 국회판(생성기, 2026-10-15): 정당명은 거의 모든 정치·정책 기사 본문에 스친다.\n"
     "                # 본문 매칭은 [단독]만 남겨 '기타 단독' 섹션으로 모은다(사용자 결정).\n"
     "                if priority_mark(it[\"title\"]) != \"🔥\":\n"
+    "                    _shadow_add(it, kw)   # 국회팀판 그림자 기록(2026-10-29) — 탈락 기사를 따로 남김, 동작 불변\n"
     "                    continue\n"
     f"                kws = {{\"{BODY_SCOOP_GROUP}\"}}\n")
 
@@ -109,6 +110,12 @@ NEW_STOPWORDS = ("# 국회판(생성기): 정당명·약칭은 묶음 판정에�
 # 원본 GROUP_ASSIGN_HOOK 자리(digest_by_group 바로 앞)에 그 파일 내용을 그대로 넣는다.
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "party_actor.py"), encoding="utf-8") as _f:
     NEW_ASSIGN_HOOK = _f.read()
+
+# 국회팀판 그림자 기록(사용자 결정 2026-10-29 "1번 바로 시작하자") — 관문을 넓히기 전 실측용. tools/shadow_gate.py를
+# news_monitor.py 맨 아래(main 바로 앞)에 넣는다: 관문 탈락 기록 + 국회의장·여야 탐색 검색 + 노컷 바이라인 확인.
+# run_check를 감싸 끝에 기록만 한다 — 화면·check·digest 동작 불변.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "shadow_gate.py"), encoding="utf-8") as _f:
+    NEW_SHADOW = _f.read()
 
 # 사진 기사 추가 규칙(사용자 요청 2026-10-15 "박정환 페이지에 사진 기사가 너무 많다") — 원본 CAPTION_EXTRA 자리.
 # R1 관형어 + (이름) + 정당 + 직함으로 끝남: '물 마시는 정점식 국민의힘 원내대표'·'퇴장한 국민의힘 의원들'
@@ -165,6 +172,8 @@ REPLACEMENTS = [
     (NM, "GROUP_ASSIGN_HOOK = None\n", NEW_ASSIGN_HOOK, 1, False),
     (NM, r"CAPTION_EXTRA = \[\n(?:    .*\n)*?\]\n", NEW_CAPTION, 1, True),
     (NM, "BYLINE_TRUST_META = False\n", "BYLINE_TRUST_META = True   # 국회판(생성기) — 방송 녹취 출연 문구 오탐 방지\n", 1, False),
+    (NM, "# ==================== main ====================\nif __name__ == \"__main__\":\n",
+         NEW_SHADOW + "# ==================== main ====================\nif __name__ == \"__main__\":\n", 1, False),
     # 석간 내일신문을 화이트리스트에 더한다(원본엔 없음 — 없으면 페이지에 아예 안 뜬다)
     (NM, "STORE_NON_WHITELIST = True\n",
          "STORE_NON_WHITELIST = True\nMEDIA_DOMAINS.add(\"naeil.com\"); MEDIA_NAMES.add(\"내일신문\")   # 국회판(생성기)\n", 1, False),
