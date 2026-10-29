@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""뉴스레이다 국회(정당)판(박정환 기자용) 생성기.
+"""뉴스레이다 국회팀판(CBS 국회팀용, 팀장 박정환) 생성기.
+(2026-10-29 사용자 결정: 박정환 기자 개인판 → 국회팀판. 골격은 그대로.)
 
 원본(tolibre/news-monitor — 김광일 기자 출입처판)의 파일을 그대로 가져와
 '검색어·바이라인·브라우저 저장키·보관 기간' 같은 설정만 바꿔 이 저장소에 쓴다.
@@ -36,7 +37,7 @@ NEW_BOOST = ("LIVE_MEDIA_BOOST = {\n"
              f'    "am": [({_set_lit(DAILY_AM)}, {BOOST_SLOT})],\n'
              f'    "pm": [({_set_lit(DAILY_PM)}, {BOOST_SLOT})],\n'
              "}   # 국회판(생성기)\n")
-BEATS_TITLE = "국회·정당"
+BEATS_TITLE = "국회팀"
 STORE_PREFIX = "nm-asm-"                  # 원본('nm-live-')·재경부판('nm-moef-')과 같은 출처라 반드시 달라야 한다
 PARTIES = ["더불어민주당", "국민의힘", "조국혁신당", "개혁신당"]   # 사용자가 준 순서 = 섹션 순서
 REPORT_ORDER_JS = "[" + ",".join(f"'{p}'" for p in PARTIES) + "]"
@@ -186,9 +187,9 @@ REPLACEMENTS = [
          '<button type="button" id="sync" class="sync off" style="display:none"', 1, False),
     (RP, "<title>뉴스레이다</title>", f"<title>뉴스레이다 · {BEATS_TITLE}</title>", 1, False),
     # 0-75: 머리줄 판 주인(사용자 10/23 "이 페이지가 누구의 판인지 각자의 이름을 써주면 좋겠어. 출입처명도 간략히")
-    (RP, '<span class="who">김광일<span class="whob"> (과학·방송·경쟁 담당)</span></span>', '<span class="who">박정환<span class="whob"> (국회)</span></span>', 1, False),
+    (RP, '<span class="who">김광일<span class="whob"> (과학·방송·경쟁 담당)</span></span>', '<span class="who">CBS 국회팀<span class="whob"> (정당)</span></span>', 1, False),
     (RP, "document.title = '뉴스레이다 · ' + r.title;",
-         "document.title = '뉴스레이다(국회) · ' + r.title;", 1, False),
+         "document.title = '뉴스레이다(국회팀) · ' + r.title;", 1, False),
     (RP, "맨 끝 ‘김광일 기자’는", f"맨 끝 ‘{TEAM_SECTION}’(팀원 {len(TEAM)}명 기사, 보고 양식에선 &lt;기처리&gt;)은", 1, False),
     (RP, "체크한 기사와 ‘여기까지 확인’은 이 기기에 저장되고, 머리줄 <b>기기 연동</b>을 켜면 다른 기기와 맞춰집니다(내 GitHub 비공개 gist). · <a href=\"../\">최신 다이제스트</a> · <a href=\"../archive/\">지난 다이제스트</a></p>",
          "체크한 기사와 ‘여기까지 확인’은 이 기기(브라우저)에만 저장됩니다 — PC와 폰은 따로 기억합니다.</p>", 1, False),

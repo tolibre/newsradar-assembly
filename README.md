@@ -1,6 +1,6 @@
-# 뉴스레이다 · 국회(정당)판
+# 뉴스레이다 · 국회팀판
 
-CBS노컷뉴스 국회 출입 박정환 기자용 보고 준비 페이지.
+CBS노컷뉴스 국회팀(팀장 박정환) 보고 준비 페이지. 2026-10-29 박정환 기자 개인판에서 국회팀판으로 이름을 바꿨다(골격 동일).
 원본 [tolibre/news-monitor](https://github.com/tolibre/news-monitor)(김광일 기자 출입처판)에서 설정만 바꿔 만든 판이다.
 같은 방식의 재경부판: [tolibre/newsradar-moef](https://github.com/tolibre/newsradar-moef).
 
