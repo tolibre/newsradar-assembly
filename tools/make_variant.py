@@ -39,6 +39,34 @@ NEW_BOOST = ("LIVE_MEDIA_BOOST = {\n"
              "}   # 국회판(생성기)\n")
 BEATS_TITLE = "국회팀"
 STORE_PREFIX = "nm-asm-"                  # 원본('nm-live-')·재경부판('nm-moef-')과 같은 출처라 반드시 달라야 한다
+
+# 팀별 화면(사용자 2026-10-29): 여당팀(김태헌·김재환·박희영·박인 — 민주당·조국혁신당·국회의장),
+# 야당팀(윤준호·이은지·김정록 — 국민의힘·개혁신당). 박정환 팀장은 여야 모두. 상임위 등 국회 전반은 양 팀 모두.
+# 모니터는 양 팀 막내(박인·김정록)가 해서 팀장에게 올리고, 팀장이 보강해 국회팀 보고를 완성 — 겹쳐 올라가는 건 팀장이 조정.
+# 주소 ?team=여당 / ?team=야당. 'hide'(숨김 목록)에 없는 섹션은 두 화면 모두에 나온다(기타 단독·앞으로의 국회 공통 섹션).
+TEAM_VIEWS = {
+    "여당": {"label": "여당팀", "members": ["박정환", "김태헌", "김재환", "박희영", "박인"],
+             "hide": ["국민의힘", "개혁신당"]},
+    "야당": {"label": "야당팀", "members": ["박정환", "윤준호", "이은지", "김정록"],
+             "hide": ["더불어민주당", "조국혁신당", "국회의장"]},
+}
+TEAM_ALIASES = {"여당": "여당", "여당팀": "여당", "ruling": "여당", "y": "여당",
+                "야당": "야당", "야당팀": "야당", "opposition": "야당", "o": "야당"}
+import json as _json
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "team_views.js"), encoding="utf-8") as _f:
+    NEW_TEAM_JS = (_f.read().replace("__TEAMS__", _json.dumps(TEAM_VIEWS, ensure_ascii=False))
+                   .replace("__ALIASES__", _json.dumps(TEAM_ALIASES, ensure_ascii=False))
+                   .replace("__PREFIX__", STORE_PREFIX))
+VIEW_OLD = ("  function view(raw){\n    var ds = dutyNames();\n"
+            "    var base = copyObj(raw); base.reports = baseReports(raw);\n"
+            "    if(dutyOn || !raw.duty || !raw.duty.length) return base;\n")
+VIEW_NEW = ("  function view(raw){\n    var ds = dutyOn ? {} : dutyNames();\n"
+            "    if(TEAM) Object.keys(TEAM.drop).forEach(function(g){ ds[g] = 1; });   // 국회팀판 팀 화면: 다른 팀 섹션도 걷어 낸다\n"
+            "    var base = copyObj(raw); base.reports = baseReports(raw);\n"
+            "    if(!TEAM && (dutyOn || !raw.duty || !raw.duty.length)) return base;\n")
+VIEW_END_OLD = "      return r2;\n    });\n    return out;\n  }\n"
+VIEW_END_NEW = ("      if(TEAM && r2.byline) r2.byline = teamByline(r2.byline);   // 국회팀판: 그 팀원 <기처리>만\n"
+                + VIEW_END_OLD)
 PARTIES = ["더불어민주당", "국민의힘", "조국혁신당", "개혁신당"]   # 사용자가 준 순서 = 섹션 순서
 REPORT_ORDER_JS = "[" + ",".join(f"'{p}'" for p in PARTIES) + "]"
 
@@ -185,7 +213,10 @@ REPLACEMENTS = [
          f"var REPORT_ORDER = {REPORT_ORDER_JS};", 2, False),
     (RP, "출입처 순서(방미통위 → 공정위 → 과기정통부 → 우주청 → 2진)",
          "정당 순서(" + " → ".join(PARTIES) + ")", 2, False),
-    (RP, "'nm-live-", f"'{STORE_PREFIX}", 6, False),
+    (RP, "'nm-live-", "TK+'", 6, False),   # 저장키 접두어 TK = 'nm-asm-'(전체) 또는 'nm-asm-여당-'·'nm-asm-야당-'(팀 화면)
+    (RP, "  var STORE = TK+'picks-v1';\n", NEW_TEAM_JS + "  var STORE = TK+'picks-v1';\n", 1, False),
+    (RP, VIEW_OLD, VIEW_NEW, 1, False),
+    (RP, VIEW_END_OLD, VIEW_END_NEW, 1, False),
     (RP, '[data-g="공정위"], [data-b="공정위"]', '[data-g="더불어민주당"], [data-b="더불어민주당"]', 1, False),
     (RP, '[data-g="방미통위"], [data-b="방미통위"]', '[data-g="국민의힘"], [data-b="국민의힘"]', 1, False),
     (RP, '[data-g="우주항공청"], [data-b="우주항공청"]', '[data-g="조국혁신당"], [data-b="조국혁신당"]', 1, False),
@@ -198,8 +229,8 @@ REPLACEMENTS = [
     # 0-75: 머리줄 판 주인(사용자 10/23 "이 페이지가 누구의 판인지 각자의 이름을 써주면 좋겠어. 출입처명도 간략히")
     (RP, '<span class="who">김광일<span class="whob"> (과학·방송·경쟁 담당)</span></span>', '<span class="who">CBS 국회팀<span class="whob"> (정당)</span></span>', 1, False),
     (RP, "document.title = '뉴스레이다 · ' + r.title;",
-         "document.title = '뉴스레이다(국회팀) · ' + r.title;", 1, False),
-    (RP, "맨 끝 ‘김광일 기자’는", f"맨 끝 ‘{TEAM_SECTION}’(팀원 {len(TEAM)}명 기사, 보고 양식에선 &lt;기처리&gt;)은", 1, False),
+         "document.title = '뉴스레이다(' + (TEAM ? '국회 ' + TEAM.label : '국회팀') + ') · ' + r.title;", 1, False),
+    (RP, "맨 끝 ‘김광일 기자’는", f"맨 끝 ‘{TEAM_SECTION}’(팀원 {len(TEAM)}명 기사, 보고 양식에선 &lt;기처리&gt; — 팀 화면(주소 끝 ?team=여당·?team=야당)에선 그 팀원과 팀장 기사만)은", 1, False),
     (RP, "체크한 기사와 ‘여기까지 확인’은 이 기기에 저장되고, 머리줄 <b>기기 연동</b>을 켜면 다른 기기와 맞춰집니다(내 GitHub 비공개 gist). · <a href=\"../\">최신 다이제스트</a> · <a href=\"../archive/\">지난 다이제스트</a></p>",
          "체크한 기사와 ‘여기까지 확인’은 이 기기(브라우저)에만 저장됩니다 — PC와 폰은 따로 기억합니다.</p>", 1, False),
 ]
