@@ -12,11 +12,12 @@
 
 # 사람 → 정당 명단. 정권·당적이 바뀌면 고칠 것. (2026-10-15: 제목 '정당 이름 + 직함' 패턴 실측 + 사용자 확인 + Claude 정리)
 # 정부 인사(총리·장관)는 여권으로 보고 더불어민주당에 둔다.
+# 조정식은 뺐다(2026-10-29) — 22대 후반기 국회의장(2026-06 선출). 의장 기사는 '국회의장' 섹션(assembly_gate).
 PARTY_PEOPLE = {
     "더불어민주당": """
         정청래 김민석 한병도 박찬대 추미애 최민희 서영교 김병주 진성준 윤호중 김성주 박지원 우상호 김남국
         박주민 윤건영 김영진 이상식 김남희 김용민 장경태 김현정 한준호 전현희 정동영 백혜련 고민정 부승찬
-        김준혁 양문석 황희 이재정 조정식 김태년 문금주 이해식 노종면 이훈기 이정헌 김윤덕 박선원 박범계
+        김준혁 양문석 황희 이재정 김태년 문금주 이해식 노종면 이훈기 이정헌 김윤덕 박선원 박범계
         이성윤 이언주 송영길 이인영 이광재 권칠승 김영호 김우영 남인순 문대림 문진석 민홍철 박균택 박상혁
         송재봉 윤후덕 이기헌 이소영 이주희 임문영 임미애 전은수 최종성 강훈식 김병기 허영 박홍근 홍익표
     """,
@@ -146,3 +147,58 @@ def party_actor_group(title, kws):
 
 
 GROUP_ASSIGN_HOOK = party_actor_group
+
+
+# ---- 국회팀판 관문 넓히기(2026-10-29, 사용자 "지금 해결하자") ----
+# 정당 관문(제목에 정당 단서)에서 떨어지던 국회팀 기사를 되살린다. 10/29 그림자 기록 1,428건으로 채점한 규칙:
+#  ① 국회의장 → '국회의장' 섹션(여당팀 몫)   ② 사람 → 그 사람 정당 섹션   ③ 국회 전반(여야 협상·운영위·국정조사 등) → '국회' 섹션(양 팀)
+# 지방의회·해외 기사는 버린다. '국감' 단독 단어는 넣지 않는다(부처 국감 기사가 한 달 수천 건).
+GATE_SPEAKER_GROUP, GATE_ASSEMBLY_GROUP = "국회의장", "국회"
+_GATE_LOCAL = re.compile(r"(?:도|시|구|군)의(?:원|회)|도의장|시의장|구의장|군의장|교육위원|지방의회|기초의회|광역의회|협치위")
+_GATE_FOREIGN = re.compile(r"(?:베트남|라오스|캄보디아|몽골|日|일본|中|중국|美|미국|러시아|대만|영국|프랑스|독일|태국|필리핀|인도네시아)\s*(?:의\s*)?(?:여야|국회의장|국회|의회|하원|상원|여당|야당|민주당|공화당)")
+_GATE_ABROAD = re.compile(r"베트남|라오스|캄보디아|몽골|일본|중국|미국|러시아|대만|영국|프랑스|독일|태국|필리핀|인도네시아|우즈벡|카자흐|튀르키예|헝가리|폴란드|유엔|UN|[日中美露英佛獨]")
+_GATE_FOREIGN_SRC = re.compile(r"Vietnam|Việt|Thông|vietnam", re.I)   # 베트남 매체(국회의장 쩐 타인 먼 기사)
+_GATE_SPEAKER = re.compile(r"국회의장|국회\s*부의장|조정식\s*(?:국회\s*)?의장|국회의장단|의장단\s*회동")
+_GATE_ASSEMBLY = re.compile(
+    r"^여야[,\s·]|여야\s*(?:합의|협상|회동|원내대표|지도부|대표|협의|이견|대치|충돌|공방|격돌|극한|강대강|타협|잠정|막판|정쟁|신경전|난타전|설전)|"
+    r"원내대표\s*회동|국정조사|국조(?!실)|예결위|예산안\s*(?:심사|처리|협상|합의)|법사위|운영위|원구성|필리버스터|패스트트랙|쟁점\s*법안|"
+    r"국감\s*(?:파행|정회|중단|중지)|본회의")
+# 사람 관문에서 빼는 이름 — 동명이인이 흔하거나(CBS 앵커 김현정, 방송인 김성주, 역사 인물 황희) 지금 정부 인사(장관 등)라 정당 기사가 아닌 것.
+GATE_PEOPLE_EXCLUDE = {"김현정", "김성주", "황희", "윤호중", "정동영", "박홍근", "이소영", "김영호", "강훈식"}
+_GATE_POS = r"(?:국회의원|의원|대표|원내대표|최고위원|수석대변인|대변인|사무총장|위원장|정책위의장|원내수석부대표|비대위원장)"
+
+
+def _gate_person(s):
+    """제목 속 정치인 → 정당. ② 맨 앞 사람(party_actor와 같은 판정) 또는 명단 이름(3자)이 직함과 붙어 있으면 어디서든
+    ('국방위원장 진성준'·'강승규 국회의원'). 정당 단서 판정(③)은 쓰지 않는다 — '美민주당'이 걸린다."""
+    m = re.match(r"([가-힣]{2,4})(\s*" + _PA_POS + r")?\s*", s)
+    if m and m.group(1) not in GATE_PEOPLE_EXCLUDE:
+        rest = s[m.end():]
+        if rest[:1] in ",\"“'‘-–—:…" or m.group(2):
+            g = _pa_people().get(m.group(1))
+            if g:
+                return g
+    for g, names in PARTY_PEOPLE.items():
+        for n in names.split():
+            if len(n) < 3 or n in GATE_PEOPLE_EXCLUDE or n not in s:
+                continue
+            if re.search(r"(?<![가-힣])" + n + r"\s*" + _GATE_POS, s) or re.search(_GATE_POS + r"\s+" + n + r"(?![가-힣])", s):
+                return g
+    return None
+
+
+def assembly_gate(title, source=""):
+    """정당 관문 탈락 기사 중 국회팀이 볼 기사면 섹션 이름, 아니면 None."""
+    raw = clean(title or "")
+    s = strip_media_tail(raw)
+    s = re.sub(r"^\s*(?:[\[\(<【][^\]\)>】]{0,20}[\]\)>】]\s*)+", "", s).strip()
+    if not s or _GATE_LOCAL.search(s) or _GATE_FOREIGN_SRC.search(raw + " " + (source or "")):
+        return None
+    if _GATE_SPEAKER.search(s):   # 해외 국회의장(베트남·몽골 등) 기사 — '조정식'이 없고 나라 이름이 있으면 버림
+        return GATE_SPEAKER_GROUP if "조정식" in s or not _GATE_ABROAD.search(s) else None
+    g = _gate_person(s)
+    if g:
+        return g
+    if _GATE_ASSEMBLY.search(s) and not _GATE_FOREIGN.search(s):
+        return GATE_ASSEMBLY_GROUP
+    return None

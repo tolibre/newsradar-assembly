@@ -76,7 +76,7 @@ VIEW_END_OLD = "      return r2;\n    });\n    return out;\n  }\n"
 VIEW_END_NEW = ("      if(TEAM && r2.byline) r2.byline = teamByline(r2.byline);   // 국회팀판: 그 팀원 <기처리>만\n"
                 + VIEW_END_OLD)
 PARTIES = ["더불어민주당", "국민의힘", "조국혁신당", "개혁신당"]   # 사용자가 준 순서 = 섹션 순서
-REPORT_ORDER_JS = "[" + ",".join(f"'{p}'" for p in PARTIES) + "]"
+REPORT_ORDER_JS = "[" + ",".join(f"'{p}'" for p in PARTIES + ["국회의장", "국회"]) + "]"   # 국회팀판: 의장·국회 섹션은 정당 뒤
 
 # 제목에는 정식 명칭보다 약칭이 압도적으로 많다(원본 DB 9/14~10/14 제목 실측:
 # '더불어민주당' 9건 vs '민주당' 210건, '국민의힘' 138건 vs '국힘' 223건).
@@ -117,13 +117,23 @@ NEW_MAX_PAGES = "KEYWORD_MAX_PAGES = {\n    \"CBS\": 1,\n" + \
     "".join(f'    "{p}": 3,   # 관문 탈락분은 DB에 안 남아 매번 상한까지 넘긴다 — 300건이면 시간당 수집량의 몇 배\n' for p in PARTIES) + \
     "".join(f'    "{a}": 0,   # 약칭 — 제목 판정용, 네이버 검색 안 함\n' for a in ABBR) + "}\n"
 
+# 국회팀판(2026-10-29, 사용자 "지금 해결하자"): 관문을 넓힌다 — [단독]은 그대로 '기타 단독', 아니면 assembly_gate
+# (tools/party_actor.py: 국회의장 → '국회의장' / 제목 속 정치인 → 그 정당 / 여야 협상·운영위·국정조사 등 → '국회')를 통과한 것만 받고,
+# 나머지는 그림자 기록에 남긴다(tools/shadow_gate.py).
+GATE_GROUPS = ["국회의장", "국회"]   # 정당 4개 뒤 섹션 순서(그다음 '기타 단독'). 국회의장은 여당팀 몫, 국회는 양 팀
 NEW_FALLBACK = (
     "                # 국회판(생성기, 2026-10-15): 정당명은 거의 모든 정치·정책 기사 본문에 스친다.\n"
     "                # 본문 매칭은 [단독]만 남겨 '기타 단독' 섹션으로 모은다(사용자 결정).\n"
+    "                # 국회팀판(2026-10-29): [단독]이 아니어도 국회의장·제목 속 정치인·국회 전반 기사는 받는다(assembly_gate).\n"
     "                if priority_mark(it[\"title\"]) != \"🔥\":\n"
-    "                    _shadow_add(it, kw)   # 국회팀판 그림자 기록(2026-10-29) — 탈락 기사를 따로 남김, 동작 불변\n"
-    "                    continue\n"
-    f"                kws = {{\"{BODY_SCOOP_GROUP}\"}}\n")
+    "                    _ag = assembly_gate(it[\"title\"], it[\"source\"])\n"
+    "                    if not _ag:\n"
+    "                        _shadow_add(it, kw)   # 국회팀판 그림자 기록 — 탈락 기사를 따로 남김\n"
+    "                        continue\n"
+    "                    kws = {_ag}\n"
+    "                else:\n"
+    f"                    kws = {{\"{BODY_SCOOP_GROUP}\"}}\n"
+    "                it[\"fb\"] = True   # 국회팀판: 다른 검색어로 또 잡혀도 섹션이 바뀌지 않게\n")
 
 # 같은 사안이 정당 섹션 두 곳에 갈리던 문제(사용자 결정 2026-10-15 — '1번: 사안 단위로 합치기').
 # 섹션은 '제목에 먼저 걸린 정당 단서'로 정해져, 같은 사안이 제목에 與가 있느냐로 갈렸다
@@ -174,6 +184,14 @@ REPLACEMENTS = [
     # ---- news_monitor.py: 검색어 ----
     # 0-44(2026-10-18): 원본은 당직 출입처 8곳을 날마다 따로 수집한다(알림 없음, 뉴스레이다 '당직' 스위치로만 봄).
     # 국회판은 쓰지 않는다 — 켜 두면 이 판 출입처에 없는 당직 그룹(국토부·농식품부 등)을 매시간 수집해 DB만 커진다.
+    # 국회팀판(2026-10-29): '국회의장'·'국회' 섹션을 정당 뒤 고정 순서로(검색어가 아니라 GROUP_ORDER에 직접 더함).
+    (NM, "    if _g not in GROUP_ORDER:\n        GROUP_ORDER.append(_g)\n\n",
+         "    if _g not in GROUP_ORDER:\n        GROUP_ORDER.append(_g)\nGROUP_ORDER += " + repr(GATE_GROUPS) + "   # 국회팀판(생성기) — 관문 넓히기 섹션\n\n", 1, False),
+    # 국회팀판(2026-10-29): 본문 매칭으로 받은 기사('기타 단독'·관문 넓히기 섹션)가 다른 정당 검색에서 또 잡히면 그 검색어가 덧붙어
+    # 정당 섹션으로 새던 것을 막는다(실측: 기타 단독 1,124건 중 59건이 '국민의힘,기타 단독' 등으로 정당 섹션에 갔다).
+    (NM, "            if aid in collected:\n                if gate_ok:\n                    collected[aid][\"kws\"].add(kw)\n                continue\n            kws = set(matched_keywords(it[\"title\"]))\n",
+         "            if aid in collected:\n                if gate_ok and not collected[aid].get(\"fb\"):   # 국회팀판: 본문 매칭으로 받은 기사엔 검색어를 더하지 않는다\n"
+         "                    collected[aid][\"kws\"].add(kw)\n                continue\n            kws = set(matched_keywords(it[\"title\"]))\n", 1, False),
     (NM, "DUTY_COLLECT = True\n",
          "DUTY_COLLECT = False   # 국회판은 당직 수집을 하지 않는다(생성기, 0-44)\n", 1, False),
     # 0-46: 원본의 EXCLUDE_TERMS(대한체육회·스포츠공정위·모의공정위)는 '공정위' 검색어 오탐용이다. 이 판은 '공정위'를
@@ -282,7 +300,7 @@ EXPECT = {
     "DUTY_ONLY_GROUPS": [],   # 0-44 — 당직 수집 꺼짐
     "EXCLUDE_TERMS": [],      # 0-46 — 공정위 오탐용 제외어 꺼짐
     "KEYWORDS": KW_ORDER,
-    "GROUP_ORDER": PARTIES,
+    "GROUP_ORDER": PARTIES + GATE_GROUPS,
     "RETENTION_DAYS": 14,
     "KEYWORD_MAX_PAGES": dict({"CBS": 1}, **{p: 3 for p in PARTIES}, **{a: 0 for a in ABBR}),
     "BYLINE_NAME": REPORTER,

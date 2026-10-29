@@ -475,6 +475,7 @@ for _k in KEYWORDS:
     _g = KEYWORD_GROUPS.get(_k, _k)
     if _g not in GROUP_ORDER:
         GROUP_ORDER.append(_g)
+GROUP_ORDER += ['국회의장', '국회']   # 국회팀판(생성기) — 관문 넓히기 섹션
 
 # 그룹명 → 그 그룹을 대표하는 KEYWORDS 원소 하나. 폴백 기사 그룹 재배정
 # (REASSIGN_SCOPE_PAIRS/reassign_fallback_group, 아래 GROUP_SCOPE 절 참조)에서
@@ -2213,7 +2214,7 @@ def run_check():
             if aid in known and aid not in collected:
                 continue
             if aid in collected:
-                if gate_ok:
+                if gate_ok and not collected[aid].get("fb"):   # 국회팀판: 본문 매칭으로 받은 기사엔 검색어를 더하지 않는다
                     collected[aid]["kws"].add(kw)
                 continue
             kws = set(matched_keywords(it["title"]))
@@ -2226,10 +2227,16 @@ def run_check():
                     continue
                 # 국회판(생성기, 2026-10-15): 정당명은 거의 모든 정치·정책 기사 본문에 스친다.
                 # 본문 매칭은 [단독]만 남겨 '기타 단독' 섹션으로 모은다(사용자 결정).
+                # 국회팀판(2026-10-29): [단독]이 아니어도 국회의장·제목 속 정치인·국회 전반 기사는 받는다(assembly_gate).
                 if priority_mark(it["title"]) != "🔥":
-                    _shadow_add(it, kw)   # 국회팀판 그림자 기록(2026-10-29) — 탈락 기사를 따로 남김, 동작 불변
-                    continue
-                kws = {"기타 단독"}
+                    _ag = assembly_gate(it["title"], it["source"])
+                    if not _ag:
+                        _shadow_add(it, kw)   # 국회팀판 그림자 기록 — 탈락 기사를 따로 남김
+                        continue
+                    kws = {_ag}
+                else:
+                    kws = {"기타 단독"}
+                it["fb"] = True   # 국회팀판: 다른 검색어로 또 잡혀도 섹션이 바뀌지 않게
             it["kws"] = kws
             collected[aid] = it
 
@@ -2702,11 +2709,12 @@ def digest_select(conn, start, end, now):
 
 # 사람 → 정당 명단. 정권·당적이 바뀌면 고칠 것. (2026-10-15: 제목 '정당 이름 + 직함' 패턴 실측 + 사용자 확인 + Claude 정리)
 # 정부 인사(총리·장관)는 여권으로 보고 더불어민주당에 둔다.
+# 조정식은 뺐다(2026-10-29) — 22대 후반기 국회의장(2026-06 선출). 의장 기사는 '국회의장' 섹션(assembly_gate).
 PARTY_PEOPLE = {
     "더불어민주당": """
         정청래 김민석 한병도 박찬대 추미애 최민희 서영교 김병주 진성준 윤호중 김성주 박지원 우상호 김남국
         박주민 윤건영 김영진 이상식 김남희 김용민 장경태 김현정 한준호 전현희 정동영 백혜련 고민정 부승찬
-        김준혁 양문석 황희 이재정 조정식 김태년 문금주 이해식 노종면 이훈기 이정헌 김윤덕 박선원 박범계
+        김준혁 양문석 황희 이재정 김태년 문금주 이해식 노종면 이훈기 이정헌 김윤덕 박선원 박범계
         이성윤 이언주 송영길 이인영 이광재 권칠승 김영호 김우영 남인순 문대림 문진석 민홍철 박균택 박상혁
         송재봉 윤후덕 이기헌 이소영 이주희 임문영 임미애 전은수 최종성 강훈식 김병기 허영 박홍근 홍익표
     """,
@@ -2836,6 +2844,61 @@ def party_actor_group(title, kws):
 
 
 GROUP_ASSIGN_HOOK = party_actor_group
+
+
+# ---- 국회팀판 관문 넓히기(2026-10-29, 사용자 "지금 해결하자") ----
+# 정당 관문(제목에 정당 단서)에서 떨어지던 국회팀 기사를 되살린다. 10/29 그림자 기록 1,428건으로 채점한 규칙:
+#  ① 국회의장 → '국회의장' 섹션(여당팀 몫)   ② 사람 → 그 사람 정당 섹션   ③ 국회 전반(여야 협상·운영위·국정조사 등) → '국회' 섹션(양 팀)
+# 지방의회·해외 기사는 버린다. '국감' 단독 단어는 넣지 않는다(부처 국감 기사가 한 달 수천 건).
+GATE_SPEAKER_GROUP, GATE_ASSEMBLY_GROUP = "국회의장", "국회"
+_GATE_LOCAL = re.compile(r"(?:도|시|구|군)의(?:원|회)|도의장|시의장|구의장|군의장|교육위원|지방의회|기초의회|광역의회|협치위")
+_GATE_FOREIGN = re.compile(r"(?:베트남|라오스|캄보디아|몽골|日|일본|中|중국|美|미국|러시아|대만|영국|프랑스|독일|태국|필리핀|인도네시아)\s*(?:의\s*)?(?:여야|국회의장|국회|의회|하원|상원|여당|야당|민주당|공화당)")
+_GATE_ABROAD = re.compile(r"베트남|라오스|캄보디아|몽골|일본|중국|미국|러시아|대만|영국|프랑스|독일|태국|필리핀|인도네시아|우즈벡|카자흐|튀르키예|헝가리|폴란드|유엔|UN|[日中美露英佛獨]")
+_GATE_FOREIGN_SRC = re.compile(r"Vietnam|Việt|Thông|vietnam", re.I)   # 베트남 매체(국회의장 쩐 타인 먼 기사)
+_GATE_SPEAKER = re.compile(r"국회의장|국회\s*부의장|조정식\s*(?:국회\s*)?의장|국회의장단|의장단\s*회동")
+_GATE_ASSEMBLY = re.compile(
+    r"^여야[,\s·]|여야\s*(?:합의|협상|회동|원내대표|지도부|대표|협의|이견|대치|충돌|공방|격돌|극한|강대강|타협|잠정|막판|정쟁|신경전|난타전|설전)|"
+    r"원내대표\s*회동|국정조사|국조(?!실)|예결위|예산안\s*(?:심사|처리|협상|합의)|법사위|운영위|원구성|필리버스터|패스트트랙|쟁점\s*법안|"
+    r"국감\s*(?:파행|정회|중단|중지)|본회의")
+# 사람 관문에서 빼는 이름 — 동명이인이 흔하거나(CBS 앵커 김현정, 방송인 김성주, 역사 인물 황희) 지금 정부 인사(장관 등)라 정당 기사가 아닌 것.
+GATE_PEOPLE_EXCLUDE = {"김현정", "김성주", "황희", "윤호중", "정동영", "박홍근", "이소영", "김영호", "강훈식"}
+_GATE_POS = r"(?:국회의원|의원|대표|원내대표|최고위원|수석대변인|대변인|사무총장|위원장|정책위의장|원내수석부대표|비대위원장)"
+
+
+def _gate_person(s):
+    """제목 속 정치인 → 정당. ② 맨 앞 사람(party_actor와 같은 판정) 또는 명단 이름(3자)이 직함과 붙어 있으면 어디서든
+    ('국방위원장 진성준'·'강승규 국회의원'). 정당 단서 판정(③)은 쓰지 않는다 — '美민주당'이 걸린다."""
+    m = re.match(r"([가-힣]{2,4})(\s*" + _PA_POS + r")?\s*", s)
+    if m and m.group(1) not in GATE_PEOPLE_EXCLUDE:
+        rest = s[m.end():]
+        if rest[:1] in ",\"“'‘-–—:…" or m.group(2):
+            g = _pa_people().get(m.group(1))
+            if g:
+                return g
+    for g, names in PARTY_PEOPLE.items():
+        for n in names.split():
+            if len(n) < 3 or n in GATE_PEOPLE_EXCLUDE or n not in s:
+                continue
+            if re.search(r"(?<![가-힣])" + n + r"\s*" + _GATE_POS, s) or re.search(_GATE_POS + r"\s+" + n + r"(?![가-힣])", s):
+                return g
+    return None
+
+
+def assembly_gate(title, source=""):
+    """정당 관문 탈락 기사 중 국회팀이 볼 기사면 섹션 이름, 아니면 None."""
+    raw = clean(title or "")
+    s = strip_media_tail(raw)
+    s = re.sub(r"^\s*(?:[\[\(<【][^\]\)>】]{0,20}[\]\)>】]\s*)+", "", s).strip()
+    if not s or _GATE_LOCAL.search(s) or _GATE_FOREIGN_SRC.search(raw + " " + (source or "")):
+        return None
+    if _GATE_SPEAKER.search(s):   # 해외 국회의장(베트남·몽골 등) 기사 — '조정식'이 없고 나라 이름이 있으면 버림
+        return GATE_SPEAKER_GROUP if "조정식" in s or not _GATE_ABROAD.search(s) else None
+    g = _gate_person(s)
+    if g:
+        return g
+    if _GATE_ASSEMBLY.search(s) and not _GATE_FOREIGN.search(s):
+        return GATE_ASSEMBLY_GROUP
+    return None
 
 # ==================== 주체 출입처 판정 (0-35) ====================
 # 사용자 결정(2026-10-15): "발화자나 행동한 쪽 기관을 우선시하고, 해당 출입처가 직접 메시지를 냈거나
@@ -4338,7 +4401,9 @@ def run_excluded(days=1):
 
 # ---- 국회팀판 그림자 기록(tools/make_variant.py가 이 파일을 news_monitor.py 맨 아래 main 앞에 넣는다 — 직접 고치지 말 것) ----
 # 2026-10-29 사용자 결정 "1번 바로 시작하자" + "여야 협상, 국회의장 기사도 모니터 보고에 넣어".
-# 목적: 관문(제목에 정당 단서)을 넓히기 전에 **무엇이 얼마나 들어올지** 실측한다. 화면·check·digest는 그대로다.
+# 목적: 관문(제목에 정당 단서)을 넓히기 전에 **무엇이 얼마나 들어올지** 실측한다.
+# 2026-10-29 22시 관문 넓히기(assembly_gate) 반영 — 통과하는 탐색 검색 기사는 articles로 받고, 그림자 표에 이미 있던 통과분은
+# 원래 기록 시각(seen_dt) 그대로 articles로 옮긴다(shadow_migrate, check 앞). 나머지 탈락분은 계속 기록한다.
 #   ① 관문 탈락 기록 — 정당 검색어로 잡혔지만 제목에 정당 단서가 없어 버려진 기사([단독] 제외)를 shadow_gate에 남긴다.
 #      (제목 맨 앞 정치인·국회 기관어·노컷 기사 등 어떤 규칙을 넣을지는 이 표로 나중에 채점한다.)
 #   ② 탐색 검색 — 정당 검색어로는 아예 안 잡히는 국회 기관 기사(국회의장·여야 협상)를 보려고
@@ -4350,6 +4415,7 @@ def run_excluded(days=1):
 SHADOW_PROBE_KEYWORDS = {"국회의장": 2, "여야": 3}   # 검색어 → 네이버 최대 페이지
 SHADOW_KEEP_DAYS = 4
 SHADOW_BYLINE_MAX = 20     # 실행당 여는 노컷 원문 상한(본 바이라인 수집 40과 별도)
+SHADOW_FRESH_HOURS = 36    # 탐색 검색·옮기기는 발행 36시간 이내만(첫 탐색이 몇 달 전 기사까지 거슬러 갔다)
 _SHADOW_ROWS = []
 
 
@@ -4381,7 +4447,7 @@ def shadow_finish(now=None, fetch=None):
         # ② 탐색 검색
         known = {x[0] for x in conn.execute("SELECT id FROM articles")} | \
                 {x[0] for x in conn.execute("SELECT id FROM shadow_gate")}
-        n_probe = 0
+        n_probe = n_take = 0
         for kw, pages in SHADOW_PROBE_KEYWORDS.items():
             KEYWORD_MAX_PAGES.setdefault(kw, pages)
             try:
@@ -4389,10 +4455,17 @@ def shadow_finish(now=None, fetch=None):
             except Exception as e:
                 print(f"[shadow] 탐색 '{kw}' 실패: {e}")
                 continue
+            fresh = (now - datetime.timedelta(hours=SHADOW_FRESH_HOURS)).isoformat()
             for it in items:
                 if it["id"] in known or is_excluded(it["title"]):
                     continue
                 known.add(it["id"])
+                g = assembly_gate(it["title"], it["source"]) if it["pub_dt"] >= fresh else None
+                if g:   # 관문 넓히기 — 국회의장·정치인·국회 전반 기사는 페이지로
+                    conn.execute("INSERT OR IGNORE INTO articles VALUES(?,?,?,?,?,?,?,?)",
+                                 (it["id"], it["title"], it["link"], it["source"], it["pub_dt"], seen, g, it["origin"]))
+                    n_take += 1
+                    continue
                 conn.execute("INSERT OR IGNORE INTO shadow_gate VALUES(?,?,?,?,?,?,?,?,NULL,NULL)",
                              (it["id"], it["title"], it["link"], it["source"], it["pub_dt"], seen, kw, it["origin"]))
                 n_probe += 1
@@ -4420,7 +4493,39 @@ def shadow_finish(now=None, fetch=None):
         conn.execute("DELETE FROM shadow_gate WHERE seen_dt < ?", (cut,))
         conn.commit()
         total = conn.execute("SELECT COUNT(*) FROM shadow_gate").fetchone()[0]
-        print(f"[shadow] 관문 탈락 신규 {n_gate}건 · 탐색 신규 {n_probe}건 · 노컷 확인 {len(todo)}건(팀원 {n_own}) · 보관 {total}건")
+        print(f"[shadow] 관문 탈락 신규 {n_gate}건 · 탐색 받음 {n_take}건 · 탐색 탈락 {n_probe}건 · 노컷 확인 {len(todo)}건(팀원 {n_own}) · 보관 {total}건")
+    finally:
+        conn.close()
+
+
+def shadow_migrate(now=None):
+    """그림자 표에 있던 기사 중 assembly_gate를 통과하는 것을 원래 기록 시각 그대로 articles로 옮긴다(보고 구간이 맞게)."""
+    now = now or datetime.datetime.now(KST)
+    conn = db()
+    try:
+        _shadow_table(conn)
+        fresh = (now - datetime.timedelta(hours=SHADOW_FRESH_HOURS)).isoformat()
+        moved = 0
+        for aid, title, link, source, pub, seen, origin in conn.execute(
+                "SELECT id, title, link, source, pub_dt, seen_dt, origin FROM shadow_gate WHERE pub_dt >= ?", (fresh,)).fetchall():
+            g = assembly_gate(title, source)
+            if not g:
+                continue
+            conn.execute("INSERT OR IGNORE INTO articles VALUES(?,?,?,?,?,?,?,?)", (aid, title, link, source, pub, seen, g, origin))
+            conn.execute("DELETE FROM shadow_gate WHERE id=?", (aid,))
+            moved += 1
+        # 본문 매칭 섹션('기타 단독'·국회의장·국회)에 다른 정당 검색어가 덧붙은 옛 기록을 바로잡는다(멱등 — 바로잡을 게 없으면 0건).
+        fixed = 0
+        for aid, kw in conn.execute("SELECT id, keywords FROM articles WHERE keywords LIKE '%,%' AND "
+                                    "(keywords LIKE '%기타 단독%' OR keywords LIKE '%국회%')").fetchall():
+            ks = kw.split(",")
+            own = [g for g in ("기타 단독", GATE_SPEAKER_GROUP, GATE_ASSEMBLY_GROUP) if g in ks]
+            if own and len(ks) > 1:
+                conn.execute("UPDATE articles SET keywords=? WHERE id=?", (own[0], aid))
+                fixed += 1
+        conn.commit()
+        if moved or fixed:
+            print(f"[shadow] 관문 넓히기로 그림자 표에서 {moved}건 옮김 · 섹션 덧붙은 검색어 {fixed}건 바로잡음")
     finally:
         conn.close()
 
@@ -4429,6 +4534,10 @@ _run_check_orig = run_check
 
 
 def run_check():
+    try:
+        shadow_migrate()
+    except Exception as e:
+        print(f"[warn] 그림자 표 옮기기 실패: {e}")
     _run_check_orig()
     try:
         shadow_finish()
