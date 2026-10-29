@@ -511,8 +511,44 @@ section > .more.wk .wkn{margin-left:auto; display:inline-flex; align-items:cente
   var REPORT_ORDER = ['더불어민주당','국민의힘','조국혁신당','개혁신당'];
   var SCOOP = '🔥', FLASH = '⚡';
   var WD = '일월화수목금토';
-  var STORE = 'nm-asm-picks-v1';
-  var TABSTORE = 'nm-asm-tab-v1';   // 마지막으로 본 탭(새로고침해도 그 탭으로)
+  // ---------- 팀별 화면(국회팀판 — tools/make_variant.py가 tools/team_views.js를 넣는다, 2026-10-29) ----------
+  // 여당팀·야당팀 막내가 각자 모니터해 박정환 팀장에게 올리고, 팀장이 빈틈을 보강해 국회팀 보고를 완성한다.
+  // 주소 끝 ?team=여당 / ?team=야당 → 그 팀 섹션과 그 팀원 <기처리>만(박정환 기사는 양쪽). 주소에 없으면 지금처럼 전부.
+  // '숨김 목록' 방식이라 목록에 없는 섹션(기타 단독·앞으로 생길 국회 공통 섹션 등)은 두 화면 모두에 나온다.
+  // 저장키도 팀마다 따로 — 같은 기기에서 두 화면을 열어도 체크·'여기까지 확인'이 섞이지 않게.
+  var TEAMS = {"여당": {"label": "여당팀", "members": ["박정환", "김태헌", "김재환", "박희영", "박인"], "hide": ["국민의힘", "개혁신당"]}, "야당": {"label": "야당팀", "members": ["박정환", "윤준호", "이은지", "김정록"], "hide": ["더불어민주당", "조국혁신당", "국회의장"]}};
+  var TEAM_ALIAS = {"여당": "여당", "여당팀": "여당", "ruling": "여당", "y": "여당", "야당": "야당", "야당팀": "야당", "opposition": "야당", "o": "야당"};
+  var TEAM = null;
+  (function(){
+    var m = /[?&]team=([^&#]*)/.exec(location.search), v = '';
+    if(m){ try{ v = decodeURIComponent(m[1].replace(/\+/g, ' ')).trim(); }catch(e){ v = m[1]; } }
+    var k = TEAM_ALIAS[v] || TEAM_ALIAS[v.toLowerCase()];
+    if(k){ TEAM = TEAMS[k]; TEAM.key = k; TEAM.drop = {}; TEAM.hide.forEach(function(g){ TEAM.drop[g] = 1; }); }
+  })();
+  var TK = 'nm-asm-' + (TEAM ? TEAM.key + '-' : '');
+  function teamByline(b){   // 그 팀원이 쓴(공동 바이라인이면 한 명이라도) 기사만. 쓴 기자를 모르면 남긴다.
+    if(!TEAM || !b || !b.groups || !b.groups[0]) return b;
+    var b2 = {}, g2 = {}, n = 0;
+    Object.keys(b).forEach(function(k){ b2[k] = b[k]; });
+    Object.keys(b.groups[0]).forEach(function(k){ g2[k] = b.groups[0][k]; });
+    g2.clusters = b.groups[0].clusters.map(function(c){
+      return c.filter(function(it){
+        var ws = (it.w || '').split(/[·,]/).filter(Boolean);
+        return !ws.length || ws.some(function(w){ return TEAM.members.indexOf(w) >= 0; });
+      });
+    }).filter(function(c){ return c.length; });
+    g2.clusters.forEach(function(c){ n += c.length; });
+    g2.n = n; b2.groups = [g2]; b2.n = n;
+    return b2;
+  }
+  if(TEAM){   // 머리줄 이름 — 좁은 화면은 .whob를 숨기므로 팀 이름을 앞에 둔다. 처음 화면 링크도 팀 주소를 유지
+    var _who = document.querySelector('.who');
+    if(_who) _who.innerHTML = '국회 ' + TEAM.label + '<span class="whob"> (CBS 국회팀)</span>';
+    var _br = document.querySelector('a.brand');
+    if(_br) _br.setAttribute('href', './' + location.search);
+  }
+  var STORE = TK+'picks-v1';
+  var TABSTORE = TK+'tab-v1';   // 마지막으로 본 탭(새로고침해도 그 탭으로)
   var TAB_KEEP_MS = 3*3600e3;        // 3시간 넘게 지난 기억은 무시(다음 날 아침엔 새 구간으로)
   var AUTO_EXPAND = 30;
 
@@ -530,7 +566,7 @@ section > .more.wk .wkn{margin-left:auto; display:inline-flex; align-items:cente
   // 0-61: 구간 탭은 평소 접어 둔다(사용자 10/22 "이 섹션은 평소엔 접어놓고 싶어 — 모두에게서").
   // 접힘 = '보고 전체' + '→ 다음 보고'(13:30~15:00 넘어감) + [구간별 ▸]. 펼침 기억은 이 브라우저에만.
   // 저장키를 v2로 올렸다 — 0-24b 시절 펼쳐 둔 기억(v1)이 남은 기기도 처음엔 접힌 채로 열리게.
-  var SEGSTORE = 'nm-asm-segview-v2';
+  var SEGSTORE = TK+'segview-v2';
   var segOpen = false;
   try{ segOpen = localStorage.getItem(SEGSTORE) === '1'; }catch(e){}
   // 펼쳤을 때는 0-52 그대로: 시작한 구간만 탭, 시작 안 한 구간은 끝에 회색 글자.
@@ -698,9 +734,10 @@ section > .more.wk .wkn{margin-left:auto; display:inline-flex; align-items:cente
   }
 
   function view(raw){
-    var ds = dutyNames();
+    var ds = dutyOn ? {} : dutyNames();
+    if(TEAM) Object.keys(TEAM.drop).forEach(function(g){ ds[g] = 1; });   // 국회팀판 팀 화면: 다른 팀 섹션도 걷어 낸다
     var base = copyObj(raw); base.reports = baseReports(raw);
-    if(dutyOn || !raw.duty || !raw.duty.length) return base;
+    if(!TEAM && (dutyOn || !raw.duty || !raw.duty.length)) return base;
     var out = base;
     out.reports = base.reports.map(function(r){
       var maps = [], r2 = copyObj(r);
@@ -724,6 +761,7 @@ section > .more.wk .wkn{margin-left:auto; display:inline-flex; align-items:cente
           }).filter(Boolean);
         }).filter(function(refs){ return refs.length; })};
       });
+      if(TEAM && r2.byline) r2.byline = teamByline(r2.byline);   // 국회팀판: 그 팀원 <기처리>만
       return r2;
     });
     return out;
@@ -752,7 +790,7 @@ section > .more.wk .wkn{margin-left:auto; display:inline-flex; align-items:cente
   // {보고id: {at: 확인 시점의 마지막 수집 시각, prev: 그 전 확인 시각(되돌리기용), t: 누른 시각}}
   // 되돌려서 기록이 없어진 보고는 {at:null, prev:null, t} — 지운 사실도 다른 기기에 전해야 해서 남긴다.
   // 페이지를 여는 것만으로는 기록하지 않는다 — 폰으로 잠깐 열어 봐도 '본 것'이 되지 않게.
-  var SEENSTORE = 'nm-asm-seen-v1';
+  var SEENSTORE = TK+'seen-v1';
   var seenMarks = {};
   try{ seenMarks = JSON.parse(localStorage.getItem(SEENSTORE) || '{}') || {}; }catch(e){ seenMarks = {}; }
   function saveSeen(){ seenMarks = pruneRid(seenMarks, SEEN_KEEP_DAYS); storeLocal(); syncSoon(); }
@@ -770,7 +808,7 @@ section > .more.wk .wkn{margin-left:auto; display:inline-flex; align-items:cente
   try{ picks = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; }catch(e){ picks = {}; }
   // 병합용 기록(0-26): {reportId: {segId: {key: [1|0, 바꾼 시각 ms]}}}. 해제도 0으로 남긴다 —
   // 지운 걸 다른 기기에 전하려면 '지웠다'는 기록이 있어야 해서. picks는 여기서 v=1만 뽑은 것.
-  var PTSTORE = 'nm-asm-pickt-v1';
+  var PTSTORE = TK+'pickt-v1';
   var pickt = {};
   try{ pickt = JSON.parse(localStorage.getItem(PTSTORE) || '{}') || {}; }catch(e){ pickt = {}; }
   (function reconcile(){
@@ -828,7 +866,7 @@ section > .more.wk .wkn{margin-left:auto; display:inline-flex; align-items:cente
   // 병합: 체크는 기사마다 [상태, 바꾼 시각], '여기까지 확인'은 보고마다 누른 시각 t — 나중에 바꾼 쪽이 이긴다.
   // 맞추는 때: 바꾼 뒤 1초, 화면으로 돌아올 때·창 포커스(15초에 한 번까지), 켜 둔 채 5분마다, 화면을 떠날 때.
   // 연결하지 않은 기기는 api.github.com에 아무 요청도 보내지 않는다(0-25까지와 같은 동작).
-  var SYNCSTORE = 'nm-asm-sync-v1';       // {token, gist, last}
+  var SYNCSTORE = TK+'sync-v1';       // {token, gist, last}
   var SYNC_FILE = 'newsradar-sync.json';
   var GH = 'https://api.github.com';
   var cfg = {};
@@ -1090,7 +1128,7 @@ section > .more.wk .wkn{margin-left:auto; display:inline-flex; align-items:cente
 
   function drawHeader(){
     var now = Date.now(), r = curRep();
-    document.title = '뉴스레이다(국회팀) · ' + r.title;
+    document.title = '뉴스레이다(' + (TEAM ? '국회 ' + TEAM.label : '국회팀') + ') · ' + r.title;
     document.getElementById('title').textContent = r.title;
 
     // 신선도
@@ -1304,7 +1342,7 @@ section > .more.wk .wkn{margin-left:auto; display:inline-flex; align-items:cente
       (weakShown ? legendItem('관련 약함', '과기정통부·우주항공청 묶음 중 소관 어휘가 없거나 기업·대학·지자체 홍보성인 것을 섹션 끝에 접어 둡니다. [단독]은 접지 않고, 건수에는 포함하며, 검색·‘선택’ 보기에서는 펼쳐 보입니다.') : '') +
       (function(){ var seen = {}; return Object.keys(wlShown).map(function(g){ var w = wlOf(g); if(!w) return ''; var k = w.label + '\n' + w.desc; if(seen[k]) return ''; seen[k] = 1; return legendItem(esc(w.label), esc(w.desc)); }).join(''); })() +   // 0-72: 같은 이름·설명은 한 번만
       legendItem('보고 전체 탭', '보고 기간 전체를 출입처·사안 묶음으로 다시 모읍니다. 구간이 달라도 같은 사안이면 한 묶음이고, 줄 앞 번호가 들어온 구간입니다.') +
-      legendItem('맨 끝 섹션', '맨 끝 ‘CBS 국회팀’(팀원 8명 기사, 보고 양식에선 &lt;기처리&gt;)은 발행 시각 기준(09:00 보고 당일 00:00~, 14:00 보고 당일 08:00~)입니다.') +
+      legendItem('맨 끝 섹션', '맨 끝 ‘CBS 국회팀’(팀원 8명 기사, 보고 양식에선 &lt;기처리&gt; — 팀 화면(주소 끝 ?team=여당·?team=야당)에선 그 팀원과 팀장 기사만)은 발행 시각 기준(09:00 보고 당일 00:00~, 14:00 보고 당일 08:00~)입니다.') +
       dutyNote() +
       '</dl><p class="foot-sync">체크한 기사와 ‘여기까지 확인’은 이 기기(브라우저)에만 저장됩니다 — PC와 폰은 따로 기억합니다.</p></div>';
     document.getElementById('main').innerHTML = html;
