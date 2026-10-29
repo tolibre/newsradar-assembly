@@ -64,6 +64,14 @@ VIEW_NEW = ("  function view(raw){\n    var ds = dutyOn ? {} : dutyNames();\n"
             "    if(TEAM) Object.keys(TEAM.drop).forEach(function(g){ ds[g] = 1; });   // 국회팀판 팀 화면: 다른 팀 섹션도 걷어 낸다\n"
             "    var base = copyObj(raw); base.reports = baseReports(raw);\n"
             "    if(!TEAM && (dutyOn || !raw.duty || !raw.duty.length)) return base;\n")
+# 보고 대조(사용자 2026-10-29 "좋은 기능이다. 반영하자") — 팀장 화면에서 막내 보고 두 개를 붙여 넣으면 올라온 기사를 체크하고,
+# '안 올라온 것' 필터로 빈틈만 본다. 못 찾은 줄은 '전체 양식' 끝에 붙어 그 양식이 최종 국회팀 보고가 된다. JS는 tools/report_merge.js.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "report_merge.js"), encoding="utf-8") as _f:
+    NEW_MERGE_JS = _f.read()
+MERGE_CSS = (".cmpbtn{flex:0 0 auto; padding:0 10px}\n"
+             ".cmpnote{margin:8px 0 0; padding:7px 10px; font-size:12.5px; line-height:1.6; color:var(--ink-700); background:var(--blue-50); border:1px solid var(--line-300); border-radius:2px}\n"
+             ".cmpnote .lk{border:0; background:none; padding:0 4px; color:var(--blue-700); font:inherit; text-decoration:underline; cursor:pointer}\n"
+             ".cmptext{flex:1 1 auto; min-height:220px; margin:12px 16px; padding:12px; border:1px solid var(--line-300); border-radius:2px; resize:vertical; background:var(--surf-0); color:var(--ink-900); font-family:var(--font); font-size:14px; line-height:1.7}\n")
 VIEW_END_OLD = "      return r2;\n    });\n    return out;\n  }\n"
 VIEW_END_NEW = ("      if(TEAM && r2.byline) r2.byline = teamByline(r2.byline);   // 국회팀판: 그 팀원 <기처리>만\n"
                 + VIEW_END_OLD)
@@ -217,6 +225,31 @@ REPLACEMENTS = [
     (RP, "  var STORE = TK+'picks-v1';\n", NEW_TEAM_JS + "  var STORE = TK+'picks-v1';\n", 1, False),
     (RP, VIEW_OLD, VIEW_NEW, 1, False),
     (RP, VIEW_END_OLD, VIEW_END_NEW, 1, False),
+    # ---- 보고 대조(팀장 화면) ----
+    (RP, '      <button class="dsw" type="button" id="dsw" aria-pressed="false" hidden></button>\n',
+         '      <button class="btn cmpbtn" type="button" id="cmpbtn" hidden title="막내 보고를 붙여 넣으면 올라온 기사를 체크하고 빈틈을 찾습니다"><span class="lg">보고 </span>대조</button>\n'
+         '      <button class="dsw" type="button" id="dsw" aria-pressed="false" hidden></button>\n', 1, False),
+    (RP, '<button data-f="new" aria-pressed="false" id="f-new" hidden><span class="lg">새 기사</span><span class="sm">새</span></button>\n',
+         '<button data-f="new" aria-pressed="false" id="f-new" hidden><span class="lg">새 기사</span><span class="sm">새</span></button>\n'
+         '        <button data-f="gap" aria-pressed="false" id="f-gap" hidden><span class="lg">안 올라온 것</span><span class="sm">빈틈</span></button>\n', 1, False),
+    (RP, '      <span class="seenc" id="seenc" hidden></span>\n    </div>\n  </div>\n</header>',
+         '      <span class="seenc" id="seenc" hidden></span>\n    </div>\n    <p class="cmpnote" id="cmpnote" hidden></p>\n  </div>\n</header>', 1, False),
+    (RP, ".dsw{flex:0 0 auto;", MERGE_CSS + ".dsw{flex:0 0 auto;", 1, False),
+    (RP, "  // ---------- 이벤트 ----------\n", NEW_MERGE_JS + "  // ---------- 이벤트 ----------\n", 1, False),
+    (RP, "    return {text: lines.join('\\n'), n: items.length + mine.length};\n  }\n",
+         "    var cex = cmpExtraFor(rep, segs), cen = cex.m.length + cex.g.length;   // 보고 대조: 화면에 없던 줄을 끝에(국회팀판)\n"
+         "    if(cen) lines = cmpMergeLines(lines, cex);\n"
+         "    return {text: lines.join('\\n'), n: items.length + mine.length + cen};\n  }\n", 1, False),
+    (RP, "  function keep(it){\n    if(ui.filter==='mark' && !it.m) return false;\n",
+         "  function keep(it){\n    if(ui.filter==='gap' && (GAP[it.uid] || isPicked(it.rid, it.sid, it.key))) return false;   // 보고 대조: 올라온 묶음 숨김\n"
+         "    if(ui.filter==='mark' && !it.m) return false;\n", 1, False),
+    (RP, "    fnew.hidden = !showNew;\n    seenSlot('');\n",
+         "    fnew.hidden = !showNew;\n    seenSlot('');\n"
+         "    var fgap = document.getElementById('f-gap'), showGap = !TEAM && !PAST && !!cmp[t.rep.id];   // 보고 대조(국회팀판)\n"
+         "    fgap.hidden = !showGap;\n"
+         "    if(!showGap && ui.filter === 'gap') setFilter('all');\n"
+         "    GAP = ui.filter === 'gap' ? gapSet(t.rep) : {};\n"
+         "    cmpNote(PAST ? null : t.rep);\n", 1, False),
     (RP, '[data-g="공정위"], [data-b="공정위"]', '[data-g="더불어민주당"], [data-b="더불어민주당"]', 1, False),
     (RP, '[data-g="방미통위"], [data-b="방미통위"]', '[data-g="국민의힘"], [data-b="국민의힘"]', 1, False),
     (RP, '[data-g="우주항공청"], [data-b="우주항공청"]', '[data-g="조국혁신당"], [data-b="조국혁신당"]', 1, False),
