@@ -13,8 +13,8 @@
     String(text || '').split(/\r?\n/).forEach(function(line){
       var s = line.trim(); if(!s) return;
       var h = /^<\s*([^<>]+?)\s*>$/.exec(s);
-      if(h){ sec = /기처리/.test(h[1]) ? 'g' : 'm'; return; }
-      s = s.replace(/^(?:[-·•*]|\d+[.)])\s*/, '');
+      if(h){ sec = /기처리/.test(h[1]) ? 'g' : /일정/.test(h[1]) ? 'i' : 'm'; return; }   // <일정>(0-85 국회 일정)
+      if(sec !== 'i') s = s.replace(/^(?:[-·•*]|\d+[.)])\s*/, '');   // 일정 줄 '11.6(금) …'의 날짜를 번호로 떼지 않게(0-85)
       var t = s.replace(/\s*\(([^()]*)\)\s*$/, '');   // 끝의 (매체)·(쓴 기자)
       var k = tnorm(t);
       if(k) out.push({line: s, k: k, sec: sec});
@@ -26,9 +26,14 @@
     allSegs(rep).forEach(function(s){ (s.groups || []).forEach(function(g){ g.clusters.forEach(function(c){ c.forEach(function(it){
       var x = {it: it, sid: s.id, k: tnorm(it.t)}; items.push(x); (byK[x.k] = byK[x.k] || []).push(x);
     }); }); }); });
-    var rec = cmp[rep.id] || {added: [], extra: {m: [], g: []}};
+    var rec = cmp[rep.id] || {added: [], extra: {m: [], g: [], i: []}};
+    rec.extra.i = rec.extra.i || [];
     var res = {n: 0, hit: 0, miss: 0}, once = {};
     lines.forEach(function(L){
+      if(L.sec === 'i'){   // 0-85: 막내가 넣은 국회 일정 줄은 기사와 맞추지 않고 '전체 양식' <일정>에 그대로(같은 줄은 한 번)
+        if(!rec.extra.i.some(function(x){ return cmpKey(x) === L.k; })) rec.extra.i.push(L.line);
+        return;
+      }
       if(once[L.k]) return; once[L.k] = 1; res.n++;
       var ms = byK[L.k] || [];
       if(!ms.length && L.k.length >= 10) ms = items.filter(function(x){ return x.k.length >= 10 && (x.k.indexOf(L.k) >= 0 || L.k.indexOf(x.k) >= 0); });
@@ -51,17 +56,26 @@
   // '전체 양식'에 못 찾은 줄을 붙인다 — 보고 전체(모든 구간)를 낼 때만.
   function cmpExtraFor(rep, segs){
     var rec = !TEAM && cmp[rep.id];
-    if(!rec || segs.length < allSegs(rep).length) return {m: [], g: []};
-    return rec.extra;
+    if(!rec || segs.length < allSegs(rep).length) return {m: [], g: [], i: []};
+    return {m: rec.extra.m || [], g: rec.extra.g || [], i: rec.extra.i || []};
   }
+  function cmpKey(line){ return tnorm(String(line).replace(/\s*\(([^()]*)\)\s*$/, '')); }
+  // 양식을 <모니터>·<일정>(0-85)·<기처리> 묶음으로 나눠 각 묶음 끝에 못 찾은 줄을 붙이고 다시 그 순서로 잇는다.
   function cmpMergeLines(lines, ex){
-    var gi = lines.indexOf('<기처리>');
-    var mon = gi < 0 ? lines.slice() : lines.slice(0, gi), gch = gi < 0 ? [] : lines.slice(gi + 1);
-    while(mon.length && mon[mon.length - 1] === '') mon.pop();
-    if(ex.m.length){ if(mon[0] !== '<모니터>') mon.unshift('<모니터>'); mon = mon.concat(ex.m); }
-    gch = gch.concat(ex.g);
-    var out = mon.slice();
-    if(gch.length){ if(out.length) out.push(''); out.push('<기처리>'); out = out.concat(gch); }
+    var sec = {m: [], i: [], g: []}, cur = 'm', hasM = false;
+    lines.forEach(function(l){
+      if(l === '<모니터>'){ cur = 'm'; hasM = true; return; }
+      if(l === '<일정>'){ cur = 'i'; return; }
+      if(l === '<기처리>'){ cur = 'g'; return; }
+      if(l !== '') sec[cur].push(l);
+    });
+    sec.m = sec.m.concat(ex.m || []);
+    (ex.i || []).forEach(function(l){ if(!sec.i.some(function(x){ return cmpKey(x) === cmpKey(l); })) sec.i.push(l); });
+    sec.g = sec.g.concat(ex.g || []);
+    var out = [];
+    if(sec.m.length || hasM){ out.push('<모니터>'); out = out.concat(sec.m); }
+    if(sec.i.length){ if(out.length) out.push(''); out.push('<일정>'); out = out.concat(sec.i); }
+    if(sec.g.length){ if(out.length) out.push(''); out.push('<기처리>'); out = out.concat(sec.g); }
     return out;
   }
   // '안 올라온 것' — 한 기사라도 체크된 묶음(구간 묶음·보고 전체 묶음 모두)은 통째로 숨긴다.
@@ -84,9 +98,10 @@
   function cmpNote(rep){
     var el = document.getElementById('cmpnote'), rec = !TEAM && rep && cmp[rep.id];
     if(!rec){ el.hidden = true; el.innerHTML = ''; return; }
-    var ex = rec.extra.m.length + rec.extra.g.length;
+    var ex = rec.extra.m.length + rec.extra.g.length, ei = (rec.extra.i || []).length;
     el.innerHTML = '<b>보고 대조</b> 막내 보고 ' + rec.n + '줄 중 ' + rec.hit + '줄 체크' +
       (ex ? ' · 화면에 없는 ' + ex + '줄은 ‘전체 양식’ 끝에 붙습니다' : '') +
+      (ei ? ' · 일정 ' + ei + '줄은 ‘전체 양식’ &lt;일정&gt;에 들어갑니다' : '') +
       ' <button type="button" class="lk" data-cg="1">' + (ui.filter === 'gap' ? '모든 기사 보기' : '안 올라온 것만') + '</button>' +
       ' <button type="button" class="lk" data-cadd="1">더 붙이기</button>' +
       ' <button type="button" class="lk" data-cun="1">대조 취소</button>';
@@ -96,7 +111,7 @@
   cveil.className = 'veil'; cveil.hidden = true;
   cveil.innerHTML = '<div class="panel" role="dialog" aria-modal="true" aria-labelledby="cmptitle"><div class="panel-head"><h3 id="cmptitle">보고 대조</h3>' +
     '<span class="sub" id="cmpsub"></span><button class="x" type="button" data-cx="1" aria-label="닫기">&times;</button></div>' +
-    '<textarea id="cmptext" class="cmptext" spellcheck="false" placeholder="여당팀·야당팀 막내 보고를 그대로 붙여 넣으세요. 둘을 한꺼번에 넣어도 되고, 하나씩 따로 대조해도 쌓입니다.&#10;&lt;모니터&gt; 아래 줄은 모니터, &lt;기처리&gt; 아래 줄은 기처리로 봅니다."></textarea>' +
+    '<textarea id="cmptext" class="cmptext" spellcheck="false" placeholder="여당팀·야당팀 막내 보고를 그대로 붙여 넣으세요. 둘을 한꺼번에 넣어도 되고, 하나씩 따로 대조해도 쌓입니다.&#10;&lt;모니터&gt; 아래 줄은 모니터, &lt;일정&gt; 아래 줄은 일정, &lt;기처리&gt; 아래 줄은 기처리로 봅니다."></textarea>' +
     '<div class="panel-foot"><button class="btn primary" type="button" data-cgo="1">대조</button>' +
     '<span class="hint">올라온 기사를 이 화면에서 찾아 체크합니다. 체크 안 된 묶음이 빈틈이고, 빈틈을 더 체크하면 ‘전체 양식’이 최종 보고가 됩니다.</span></div></div>';
   document.body.appendChild(cveil);

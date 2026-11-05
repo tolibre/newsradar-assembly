@@ -255,7 +255,7 @@ REPLACEMENTS = [
     (RP, ".dsw{flex:0 0 auto;", MERGE_CSS + ".dsw{flex:0 0 auto;", 1, False),
     (RP, "  // ---------- 이벤트 ----------\n", NEW_MERGE_JS + "  // ---------- 이벤트 ----------\n", 1, False),
     (RP, "    return {text: lines.join('\\n'), n: items.length + mine.length};\n  }\n",
-         "    var cex = cmpExtraFor(rep, segs), cen = cex.m.length + cex.g.length;   // 보고 대조: 화면에 없던 줄을 끝에(국회팀판)\n"
+         "    var cex = cmpExtraFor(rep, segs), cen = cex.m.length + cex.g.length + cex.i.length;   // 보고 대조: 화면에 없던 줄을 끝에(국회팀판, 0-85 일정 포함)\n"
          "    if(cen) lines = cmpMergeLines(lines, cex);\n"
          "    return {text: lines.join('\\n'), n: items.length + mine.length + cen};\n  }\n", 1, False),
     (RP, "  function keep(it){\n    if(ui.filter==='mark' && !it.m) return false;\n",
