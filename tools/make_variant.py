@@ -162,6 +162,10 @@ with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "party_actor.
 # run_check를 감싸 끝에 기록만 한다 — 화면·check·digest 동작 불변.
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "shadow_gate.py"), encoding="utf-8") as _f:
     NEW_SHADOW = _f.read()
+# 0-88(사용자 2026-11-06): 사진 기사 보강(같은 제목의 사진 원본·사진 매체의 장면 제목)과 주요 매체 밖·지역 기사 접기.
+# tools/asm_fold.py를 그림자 기록 뒤(main 바로 앞)에 넣는다 — 원본 함수는 그대로, 전역 이름만 감싼다.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "asm_fold.py"), encoding="utf-8") as _f:
+    NEW_SHADOW += _f.read()
 
 # 사진 기사 추가 규칙(사용자 요청 2026-10-15 "박정환 페이지에 사진 기사가 너무 많다") — 원본 CAPTION_EXTRA 자리.
 # R1 관형어 + (이름) + 정당 + 직함으로 끝남: '물 마시는 정점식 국민의힘 원내대표'·'퇴장한 국민의힘 의원들'
