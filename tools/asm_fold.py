@@ -71,7 +71,11 @@ _ASM_CAP_SCENE = re.compile(
     r"(?:^|\s)\S*(?:는|[" + _ASM_NFIN + r"])\s(?:\S+\s+){0,4}"
     r"(?:" + _ASM_PARTY + r"(?:\s?(?:의원들|지도부|의원단|당원들|원내대표단|최고위원들))?"
     r"|[가-힣]{2,4}(?:\s?[-·,]\s?[가-힣]{2,4})+"
+    r"|[가-힣]{2,4}\s(?:대표|원내대표|최고위원|의원|위원장|대변인|사무총장|의장|부의장|장관|총리|정책위의장|원내수석부대표|비대위원장)"   # 0-89 '의총장 들어선 한병도 원내대표'
+    r"|[가-힣]*(?:위원회|특위)"                                                                                           # 0-89 '파이팅 외치는 민주당 체육특별위원회'
     r"|[가-힣]*(?:의원들|위원들|지도부))$")
+# 0-89: 정당 + 작은따옴표 구호·행사만 — "국민의힘 '농협법 강행, 미래대응기금 규탄 기자회견'"(뉴시스 사진)
+_ASM_CAP_QUOTE = re.compile(r"^" + _ASM_PARTY + r",?\s*['‘][^'’]{2,40}['’]$")
 _ASM_CAP_EVENT = re.compile(
     r"^(?:" + _ASM_PARTY + r"|[가-힣]+(?:위원회|특위|원내대표|대표))?\s?"
     r"(?:의원총회|의총|최고위원회의|원내대책회의|비상대책위원회의|비대위회의|정책조정회의|확대간부회의|규탄대회|규탄집회|"
@@ -94,6 +98,8 @@ def asm_caption_scene(title, link=""):
     tags = re.findall(r"\[([^\]]*)\]", s)
     if any(not _CAP_NEUTRAL_TAG_RE.match(x) for x in tags):   # 코너명([속보]·[정치 인사이드]·[핫피플] 등)이 달리면 기사
         return False
+    if _ASM_CAP_QUOTE.search(re.sub(r"\[[^\]]*\]", "", s).strip()):
+        return True
     s = re.sub(r"\[[^\]]*\]|「[^」]*」", "", s).strip().rstrip("'’\" ")
     if not s or len(s) > 32 or re.search(r"[\"“”…?!,]|\.\.\.", s) or re.search(ARTICLE_ENDINGS, s):
         return False
@@ -119,3 +125,37 @@ def build_live_data(conn, now):
         wl.setdefault(g, ASM_WL)
     return out
 
+
+# ④ 해외 정당 기사(0-89, 사용자 11/6 01:04 "아직도 너무 많다") — '민주당'·'야당' 검색어가 미국 민주당·외국 야당 기사를 끌고 온다.
+#    11/2~11/5(미 중간선거 주간) 보고에 펼쳐진 묶음의 약 10%가 미국 민주당 기사였고, 주요 매체가 여럿 받아 접기로도 안 걸렸다(20건짜리 묶음 다수).
+#    두 갈래(둘 다 **한국 정치 표지가 없을 때만**):
+#     (가) 미국: '민주당'·'공화당' + 미국 정치 낱말(중간선거·상원·하원·주지사·백악관·트럼프·美·미국 등).
+#     (나) 그 밖의 나라: 정당 낱말(민주당·야당·여당·野·與·연정) + 나라 표지(日·일본·자민당·이스라엘·네타냐후 등).
+#    與·野·여당·야당은 미국 표지와 짝짓지 않는다 — '진성준 美 비자 거부…與 "항의해야" 野 "외교 참사"'처럼 한국 기사가 많다(11/6 실측).
+#    한국 표지: 더불어민주당·국민의힘·조국혁신당·李·이재명·국회·청와대·한국·한미·관세·비자·방미·정부 등과 여야 지도부 이름.
+_ASM_KOREA_MARK = re.compile(
+    r"더불어민주당|국민의힘|국힘|조국혁신당|혁신당|개혁신당|진보당|李|이재명|이\s?대통령|대통령실|청와대|靑|국회|국감|"
+    r"한국|韓|한미|대미|방미|비자|관세|통상|우리\s?(?:정부|기업)|정부|여야|與野|윤석열|尹|순방|정청래|김민석|한병도|장동혁|송언석|조국|이준석|한동훈")
+_ASM_US_PARTY = re.compile(r"민주당|공화당")
+_ASM_US_MARK = re.compile(
+    r"美|미국|(?:^|[\s\[(‘'\"“])미\s|중간선거|상원|하원|주지사|백악관|공화당|트럼프|오바마|바이든|해리스|밴스|헤그세스|머스크|"
+    r"블루\s?(?:웨이브|쓰나미)|MAGA|뉴욕\s?증시|월가|다우|나스닥|텍사스|미시간|오하이오|알래스카|캘리포니아|애리조나|조지아주|펜실베이니아|위스콘신|CNN|NYT|폭스")
+_ASM_ETC_PARTY = re.compile(r"민주당|야당|여당|野|與|연정|집권당")
+_ASM_ETC_MARK = re.compile(r"日|일본|자민당|중의원|참의원|입헌민주|이스라엘|네타냐후|대만|민진당|국민당|英|영국|노동당|보수당|獨|독일|佛|프랑스|"
+                           r"인도|파키스탄|파라과이|아르헨티나|멕시코|캐나다|호주|러시아|우크라이나|튀르키예|이란|헝가리|폴란드")
+
+
+def asm_foreign_party(title):
+    t = strip_media_tail(clean(title or ""))
+    if _ASM_KOREA_MARK.search(t):
+        return False
+    return bool((_ASM_US_PARTY.search(t) and _ASM_US_MARK.search(t)) or (_ASM_ETC_PARTY.search(t) and _ASM_ETC_MARK.search(t)))
+
+
+_asm_orig_noise_reason = noise_reason
+
+
+def noise_reason(title, strict=False, kws=None):
+    if asm_foreign_party(title):
+        return "해외 정당"
+    return _asm_orig_noise_reason(title, strict=strict, kws=kws)
