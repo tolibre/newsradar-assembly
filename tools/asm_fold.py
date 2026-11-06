@@ -131,7 +131,7 @@ def build_live_data(conn, now):
     out = _asm_orig_build_live_data(conn, now)
     wl = out.setdefault("wl", {})
     for g in GROUP_ORDER:
-        wl.setdefault(g, ASM_WL)
+        wl[g] = ASM_WL   # 0-92: 원본이 지역 접기 이름('지역')을 먼저 넣으므로 덮어쓴다
     return out
 
 
